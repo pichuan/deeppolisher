@@ -42,8 +42,8 @@ here = pathlib.Path(__file__).parent.resolve()
 
 REQUIREMENTS = (here / 'requirements.txt').read_text().splitlines()
 EXTRA_REQUIREMENTS = {
-    'cpu': ['intel-tensorflow>=2.9.0'],
-    'gpu': ['tensorflow-gpu>=2.9.0'],
+    'cpu': ['tensorflow>=2.15.0'],
+    'gpu': ['tensorflow>=2.15.0'],
 }
 
 
@@ -68,7 +68,7 @@ setup(
     keywords='bioinformatics',
     packages=find_packages(where='.'),
     package_dir={'polisher': 'polisher'},
-    python_requires='>=3.6',
+    python_requires='>=3.9,<3.12',
     install_requires=REQUIREMENTS,
     extras_require=EXTRA_REQUIREMENTS,
     entry_points="""
