@@ -26,8 +26,9 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Implementation of multiheaded attention and self-attention layers."""
+from collections.abc import Iterable
 import math
-from typing import Any, Dict, Optional, Union, Iterable
+from typing import Any, Optional, Union
 import tensorflow as tf
 
 
@@ -100,7 +101,7 @@ class Attention(tf.keras.layers.Layer):
     )
     super().build(input_shape)
 
-  def get_config(self) -> Dict[str, Any]:
+  def get_config(self) -> dict[str, Any]:
     return {
         "hidden_size": self.hidden_size,
         "num_heads": self.num_heads,
@@ -113,9 +114,9 @@ class Attention(tf.keras.layers.Layer):
       source_input: tf.Tensor,
       bias: tf.Tensor,
       training: bool,
-      cache: Optional[Dict[str, tf.Tensor]] = None,
+      cache: Optional[dict[str, tf.Tensor]] = None,
       decode_loop_step: Optional[int] = None,
-  ) -> Dict[str, tf.Tensor]:
+  ) -> dict[str, tf.Tensor]:
     """Apply attention mechanism to query_input and source_input.
 
     Args:
@@ -203,9 +204,9 @@ class SelfAttention(Attention):
       query_input: tf.Tensor,
       bias: tf.Tensor,
       training: bool,
-      cache: Optional[Dict[str, tf.Tensor]] = None,
+      cache: Optional[dict[str, tf.Tensor]] = None,
       decode_loop_step: Optional[int] = None,
-  ) -> Dict[str, tf.Tensor]:
+  ) -> dict[str, tf.Tensor]:
     return super().call(
         query_input, query_input, bias, training, cache, decode_loop_step
     )

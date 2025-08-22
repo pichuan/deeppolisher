@@ -27,7 +27,8 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Custom metrics and losses."""
 
-from typing import Callable, Mapping, Optional, Tuple, Union
+from collections.abc import Callable, Mapping
+from typing import Optional, Union
 
 import tensorflow as tf
 
@@ -41,7 +42,7 @@ def _grab_at_index(x: tf.Tensor, index: int) -> tf.Tensor:
   return y
 
 
-def _split_diploid(x: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+def _split_diploid(x: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor]:
   x1 = _grab_at_index(x, index=0)
   x2 = _grab_at_index(x, index=1)
   return x1, x2
@@ -326,7 +327,7 @@ class AlignmentLoss(tf.keras.losses.Loss):
       self,
       y_true: tf.Tensor,
       dtype: tf.DType = tf.float32,
-  ) -> Tuple[tf.Tensor, tf.Tensor]:
+  ) -> tuple[tf.Tensor, tf.Tensor]:
     """Applies AlignmentLoss-specific preprocessing to labels tensor.
 
     Args:
@@ -585,7 +586,7 @@ class AlignmentLoss(tf.keras.losses.Loss):
       y_true: tf.Tensor,
       y_pred: tf.Tensor,
       return_matches: bool = False,
-  ) -> Union[tf.Tensor, Tuple[tf.Tensor, tf.Tensor]]:
+  ) -> Union[tf.Tensor, tuple[tf.Tensor, tf.Tensor]]:
     """Computes the alignment loss for a batch of sequences.
 
     Args:
@@ -643,7 +644,7 @@ class AlignmentLoss(tf.keras.losses.Loss):
     return self.eval(y_true, y_pred, return_matches=False)  # pytype: disable=bad-return-type  # dynamic-method-lookup
 
 
-def preprocess_y_true_metric(y_true: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+def preprocess_y_true_metric(y_true: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor]:
   """Applies AlignmentMetric-specific preprocessing to labels tensor.
 
   Args:
@@ -669,7 +670,7 @@ def preprocess_y_true_metric(y_true: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
   return y_true, y_true_lens
 
 
-def preprocess_y_pred_metric(y_pred: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+def preprocess_y_pred_metric(y_pred: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor]:
   """Applies AlignmentMetric-specific preprocessing to predictions tensor.
 
   Args:
@@ -740,7 +741,7 @@ class AlignmentMetric(tf.keras.metrics.Metric):
       self,
       y_true: tf.Tensor,
       y_pred: tf.Tensor,
-  ) -> Tuple[tf.Tensor, tf.Tensor, Mapping[str, tf.Tensor]]:
+  ) -> tuple[tf.Tensor, tf.Tensor, Mapping[str, tf.Tensor]]:
     """Computes the alignment loss for a batch of sequences.
 
     Args:
@@ -805,7 +806,7 @@ class AlignmentMetric(tf.keras.metrics.Metric):
     # Setups reduction operators.
     def reduce_max_with_argmax(
         t: tf.Tensor, axis: int = 0
-    ) -> Tuple[tf.Tensor, tf.Tensor]:
+    ) -> tuple[tf.Tensor, tf.Tensor]:
       # Note(fllinares): I haven't yet managed to beat the performance of this
       # (wasteful) implementation with tf.argmax + tf.gather / tf.gather_nd :(
       t_max = tf.reduce_max(t, axis=axis)
@@ -923,7 +924,7 @@ class AlignmentMetric(tf.keras.metrics.Metric):
         v_opt: tf.Tensor,
         m_opt: tf.Tensor,
         v_all_p1: tf.Tensor,
-    ) -> Tuple[tf.Tensor, tf.Tensor]:
+    ) -> tuple[tf.Tensor, tf.Tensor]:
       # Online computation of optimal alignment scores and final optimal state.
       v_opt_k, m_opt_k = reduce_max_with_argmax(v_all_p1, axis=0)
       # For each sequence, checks if the antidiagonal contains the entry

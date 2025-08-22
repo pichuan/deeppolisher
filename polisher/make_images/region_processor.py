@@ -27,10 +27,11 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Classes to process region for make examples."""
 
+from collections.abc import Sequence
 import dataclasses
 import logging
 import os
-from typing import Any, Optional, Sequence
+from typing import Any, Optional
 
 import intervaltree
 import numpy as np
@@ -105,7 +106,7 @@ class PositionalSpacingRecord:
           current_ref_pos += cigar_len
         elif cigar_op in [pysam.CSOFT_CLIP, pysam.CINS]:
           # Inserts require spacing so we update the max observed insert
-          # record against the obsered insert of length cigar_len
+          # record against the observed insert of length cigar_len
           if (
               interval.start <= current_ref_pos <= interval.stop
               and match_observed
@@ -333,11 +334,13 @@ class EncodedRead:
     encoded_base_qualities: Base quality value encoding of read sequence.
     encoded_mapping_quality: Mapping quality value encoding.
     encoded_match_mismatch: Encoding if the observed base is a match/mismatch.
+    encoded_haplotype_tag: Tagged haplotype for this read.
   """
   encoded_bases: np.ndarray
   encoded_base_qualities: np.ndarray
   encoded_mapping_quality: np.ndarray
   encoded_match_mismatch: np.ndarray
+  encoded_haplotype_tag: int
 
   def __init__(self, interval: RegionRecord, read: pysam.AlignedSegment,
                spaced_reference_record: SpacedReferenceRecord,
@@ -354,6 +357,11 @@ class EncodedRead:
     self.encoded_base_qualities = np.zeros(spaced_length, dtype=np.uint8)
     self.encoded_mapping_quality = np.zeros(spaced_length, dtype=np.uint8)
     self.encoded_match_mismatch = np.zeros(spaced_length, dtype=np.uint8)
+    try:
+      haplotype_tag = read.get_tag('HP')
+    except KeyError:
+      haplotype_tag = 0
+    self.encoded_haplotype_tag = encoding.get_hp_encoding(haplotype_tag)
 
     current_ref_pos = read.reference_start
     current_read_index = 0
@@ -480,27 +488,52 @@ class EncodedReference:
 class Example:
   """Example of a region generated using encoded reads and reference.
 
+  Constants:
+    READ_FEATURES: List of features to use to encode examples.
+    HAPLOTAG_ORDERING: List of haplotype tags in order.
+
   Attributes:
     max_coverage: Maximum coverage allowed for the example.
+    coverage_per_haplotype: Coverage alloted to each haplotype.
     example_width: Width of the example (in this case region).
     reads: A list of encoded reads.
-    read_features: A list of features to use to encode examples.
     feature_rows: A dictionary with how many rows each feature would consume.
     feature_indices: Row indices for each feature set.
     dims: Dimenstion of the example.
     example: An example representing stacked encoded features.
+    reads_by_haplotype: A list of reads grouped by haplotype.
+    compose_by_haplotype: Indicates if to stack haplotypes with clearly defined
+      boundaries.
   """
 
-  read_features = [
-      'encoded_bases', 'encoded_base_qualities', 'encoded_mapping_quality',
-      'encoded_match_mismatch'
+  READ_FEATURES = [
+      'encoded_bases',
+      'encoded_base_qualities',
+      'encoded_mapping_quality',
+      'encoded_match_mismatch',
   ]
+  ENCODED_HAPLOTAG_ORDERING = (2, 3, 1)
 
-  def __init__(self, max_coverage: int, example_width: int,
-               reads: list[EncodedRead], encoded_ref: EncodedReference):
+  def __init__(
+      self,
+      max_coverage: int,
+      example_width: int,
+      reads: list[EncodedRead],
+      encoded_ref: EncodedReference,
+      compose_by_haplotype: bool = False,
+  ):
     self.max_coverage = max_coverage
+    self.coverage_per_haplotype = max_coverage // 3
+    self.compose_by_haplotype = compose_by_haplotype
     self.example_width = example_width
     self.reads = reads
+    self.reads_by_haplotype = {}
+    if self.compose_by_haplotype:
+      self.reads_by_haplotype = {
+          haplotype: [r for r in reads if r.encoded_haplotype_tag == haplotype]
+          for haplotype in self.ENCODED_HAPLOTAG_ORDERING
+      }
+
     self.feature_rows = {
         'reference': 1,
         'encoded_bases': max_coverage,
@@ -526,7 +559,7 @@ class Example:
         self.feature_indices['reference']] = encoded_ref.encoded_reference
 
     # Then we loop over each feature and stack them to create the example.
-    for feature in self.read_features:
+    for feature in self.READ_FEATURES:
       features_indices = self.indices(feature, len(reads))
       self.example[features_indices] = self.stack_feature(feature)
 
@@ -542,6 +575,11 @@ class Example:
     Returns:
       A slice containing the indices corresponding to the feature.
     """
+    if self.compose_by_haplotype:
+      return slice(
+          getattr(self, feature_name),
+          getattr(self, feature_name) + self.max_coverage,
+      )
     if n_reads:
       n_rows = min(n_reads, self.max_coverage)
       return slice(
@@ -561,8 +599,37 @@ class Example:
     Returns:
       A stacked ndarray of the feature values.
     """
+    if self.compose_by_haplotype:
+      return self.stack_feature_by_haplotype(feature_name)
     return np.stack(
         [getattr(x, feature_name) for x in self.reads[:self.max_coverage]])
+
+  def stack_feature_by_haplotype(self, feature_name: str) -> np.ndarray:
+    """Extract read feature and stack by haplotype.
+
+    This function stacks the reads by haplotype, separating them into distinct
+    groups with a fixed height and consistent ordering. This allows the model to
+    disambiguate between sequences belonging to different haplotypes. Each group
+    has height `coverage_per_haplotype` and the groups are ordered according to
+    `ENCODED_HAPLOTAG_ORDERING`. When there is not sufficient coverage for a
+    given haplotype, the group is filled with empty reads.
+
+    Args:
+      feature_name: Name of the feature we want to stack.
+
+    Returns:
+      A stacked ndarray of the feature values grouped by haplotype.
+    """
+    feature_arrays = []
+    for haplotype in self.ENCODED_HAPLOTAG_ORDERING:
+      reads_by_haplotype = self.reads_by_haplotype[haplotype]
+      for i in range(self.coverage_per_haplotype):
+        if i < len(reads_by_haplotype):
+          feature_array = getattr(reads_by_haplotype[i], feature_name)
+        else:
+          feature_array = np.zeros(shape=(self.example_width,), dtype=np.uint8)
+        feature_arrays.append(feature_array)
+    return np.stack(feature_arrays)
 
   @property
   def tensor_height(self) -> int:
@@ -632,6 +699,138 @@ def get_region_length(interval: RegionRecord) -> int:
   return interval.stop - interval.start + 1
 
 
+def create_truth_reads(
+    truth_vars: list[Optional[Any]],
+    interval: RegionRecord,
+    reference_sequence: str,
+) -> list[Optional[pysam.AlignedSegment]]:
+  """Create truth reads from truth variants and reference sequence.
+
+  Create two reads made by reference and truth variant - one for each haplotype.
+  * Truth reads may extend beyond the interval.
+  * Truh reads are named as 'truth_read' to distinguish from other reads.
+  * It is assumed that truth variants are phased. Otherwise same phase variants
+  may end up in different truth reads.
+  * This code is made for diploid case but can be easily extended to ploidy > 2.
+
+  Args:
+    truth_vars: List of truth variants.
+    interval: A region interval.
+    reference_sequence: Reference sequence.
+
+  Returns:
+    A list of truth reads.
+
+  Raises:
+    ValueError: If truth does not conforms to the expected format.
+  """
+  # Last position of the reference sequence for each haplotype.
+  last_pos = [0, 0]
+  # Read sequences for each haplotype.
+  # TODO: Generalize for ploidy > 2.
+  read_sequences = ['', '']
+  read_alignments = [[], []]  # Alignment is a list of cigar tuples.
+  # Iterate over truth variants within the inerval and create read sequences by
+  # adding reference sequence and truth variants. Alignments are also created on
+  # the fly by adding match, insert, and delete operations.
+  for truth_var in truth_vars:
+    if truth_var:
+      if truth_var.start < interval.start or truth_var.start >= interval.stop:
+        logging.warning(
+            'Truth var at %d is beyond the interval.', truth_var.start
+        )
+        continue
+
+      if len(truth_var.alleles) < 2:
+        raise ValueError(
+            f'Truth variant {truth_var.id} is expected to have at least 2'
+            ' alleles.'
+        )
+      ref_allele_original = truth_var.alleles[0]
+      phased_alleles = []  # Alt alleles in the phased order.
+      gts = [s['GT'] for s in truth_var.samples.values()]
+      if gts:
+        genotype = gts[0]
+        if len(genotype) != 2:
+          raise ValueError(
+              f'Only diploid genotype is supported. Genotype {genotype} is'
+              ' invalid.'
+          )
+      else:
+        raise ValueError(
+            f'Truth variant {truth_var.id} is expected to genotype'
+        )
+      for allele_index in genotype:
+        if allele_index >= len(truth_var.alleles):
+          raise ValueError(
+              f'Genotype {genotype} is invalid for the alt alleles set.'
+          )
+        phased_alleles.append(truth_var.alleles[allele_index])
+
+      for phase, phased_allele in enumerate(phased_alleles):
+        # ref_allele may have been changed in the previous iteration.
+        ref_allele = ref_allele_original
+        # INS operation.
+        if len(phased_allele) > len(ref_allele):
+          # Normlize the INS operation.
+          while (
+              phased_allele
+              and ref_allele
+              and phased_allele[-1] == ref_allele[-1]
+          ):
+            phased_allele = phased_allele[:-1]
+            ref_allele = ref_allele[:-1]
+          operation_len = len(phased_allele) - len(ref_allele)
+          operation = pysam.CINS
+          ref_shift = len(ref_allele)
+          cigar_shift = len(ref_allele)
+        # DEL operation.
+        elif len(phased_allele) < len(ref_allele):
+          operation_len = len(ref_allele) - len(phased_allele)
+          ref_shift = len(ref_allele)
+          operation = pysam.CDEL
+          cigar_shift = 1
+        # SNP operation. It should support SUB operation since there is no limit
+        # on the length of the operation.
+        else:
+          operation_len = len(phased_allele)
+          ref_shift = len(ref_allele)
+          operation = pysam.CMATCH
+          cigar_shift = 0
+
+        ref_end_pos = min(
+            truth_var.start - interval.start, len(reference_sequence)
+        )
+        if ref_end_pos > last_pos[phase]:
+          read_sequences[phase] += reference_sequence[
+              last_pos[phase] : ref_end_pos
+          ]
+        if ref_end_pos + cigar_shift > last_pos[phase]:
+          read_alignments[phase].append(
+              (pysam.CMATCH, ref_end_pos + cigar_shift - last_pos[phase])
+          )
+        read_alignments[phase].append((operation, operation_len))
+
+        last_pos[phase] = truth_var.start + ref_shift - interval.start
+        # Add the truth variant.
+        read_sequences[phase] += phased_allele
+  for index, _ in enumerate(read_sequences):
+    if last_pos[index] < len(reference_sequence):
+      read_sequences[index] += reference_sequence[last_pos[index] :]
+      read_alignments[index].append(
+          (pysam.CMATCH, len(reference_sequence) - last_pos[index])
+      )
+  truth_reads = []
+  for index, read_resquence in enumerate(read_sequences):
+    truth_read = pysam.AlignedSegment()
+    truth_read.query_sequence = read_resquence
+    truth_read.cigartuples = read_alignments[index]
+    truth_read.query_name = 'truth_read'
+    truth_read.reference_start = interval.start
+    truth_reads.append(truth_read)
+  return truth_reads
+
+
 def get_tf_examples(
     interval: RegionRecord,
     reads: list[pysam.AlignedSegment],
@@ -640,6 +839,8 @@ def get_tf_examples(
     ploidy: int,
     bed_interval_regions: list[RegionRecord],
     truths: list[Optional[pysam.AlignedSegment]],
+    truth_vars: Optional[list[Any]] = None,
+    compose_by_haplotype: bool = False,
 ) -> list[Any]:
   """Generates tf examples from reads aligned to a region.
 
@@ -662,6 +863,9 @@ def get_tf_examples(
     bed_interval_regions: BED interval regions provided for this region.
     truths: List of truth reads from which to generate labels. Length of truths
       should match ploidy.
+    truth_vars: List of truth variants from which to generate labels. If
+      truth_vars is not None, then truths is ignored.
+    compose_by_haplotype: If true, compose Example by haplotag.
 
   Returns:
     A list of tf.train.Example() for each active position in this region.
@@ -670,7 +874,12 @@ def get_tf_examples(
   if not train_mode:
     spacing_record = PositionalSpacingRecord(interval, reads)
   else:
+    if truth_vars:
+      truths = create_truth_reads(truth_vars, interval, reference_sequence)
     # If we are in train mode then truth_read needs to be used for spacing.
+    if not truths:
+      logging.warning('Labels could not be generated for %s.', interval)
+      return []
     spacing_record = PositionalSpacingRecord(interval, reads + truths)
 
   # Step 2: Calculate how many active positions are there in this region.
@@ -736,8 +945,9 @@ def get_tf_examples(
     # Use the first active position to create examples.
     active_position = active_positions[0]
     # get all the read names that intersect with this position
-    overlapping_reads_tree = spacing_record.read_span_intervaltree[
-        active_position]
+    overlapping_reads_tree = sorted(
+        spacing_record.read_span_intervaltree[active_position]
+    )
 
     overlapping_encoded_reads = []
     for overlapping_read_interval in overlapping_reads_tree:
@@ -761,6 +971,7 @@ def get_tf_examples(
         example_width=spaced_length,
         reads=overlapping_encoded_reads,
         encoded_ref=encoded_reference,
+        compose_by_haplotype=compose_by_haplotype,
     )
     region_start_index = max(
         0, spaced_ref_record.ref_position_to_index[active_position] -
@@ -852,11 +1063,13 @@ class OptionsForProcess:
   cpus: Total number of CPUs available for processing.
   ploidy: Number of labels to include, e.g. 1 for haploid assembly polishing,
       2 for diploid variant calling.
+  compose_by_haplotype: If true, compose examples divided by 3 haplotype groups.
   """
 
   bam_file: str
   fasta_file: str
   truth_to_ref: Optional[str]
+  truth_vcf: Optional[str]
   bed_regions_by_contig: Optional[dict[str, Any]]
   all_intervals: list[RegionRecord]
   train_mode: bool
@@ -864,6 +1077,7 @@ class OptionsForProcess:
   process_id: int
   cpus: int
   ploidy: int
+  compose_by_haplotype: bool
 
 
 def run_process(options: OptionsForProcess) -> dict[str, Any]:
@@ -880,6 +1094,7 @@ def run_process(options: OptionsForProcess) -> dict[str, Any]:
   bam_file = options.bam_file
   fasta_file = options.fasta_file
   truth_to_ref = options.truth_to_ref
+  truth_vcf = options.truth_vcf
   bed_regions_by_contig = options.bed_regions_by_contig
   all_intervals = options.all_intervals
   train_mode = options.train_mode
@@ -887,11 +1102,12 @@ def run_process(options: OptionsForProcess) -> dict[str, Any]:
   process_id = options.process_id
   cpus = options.cpus
   ploidy = options.ploidy
+  compose_by_haplotype = options.compose_by_haplotype
 
   # Generate the output filename for this process:
   tf_options = tf.io.TFRecordOptions(compression_type='GZIP')
-  # Append the suffix "process_id.tfrecords.gz" to the output filename.
-  process_filename = f'{output_filename}_{process_id}.tfrecords.gz'
+  # Append the suffix "process_id.tfrecord.gz" to the output filename.
+  process_filename = f'{output_filename}_{process_id}.tfrecord.gz'
   # Create subdirs if necessary.
   tf.io.gfile.makedirs(os.path.dirname(process_filename))
 
@@ -924,31 +1140,43 @@ def run_process(options: OptionsForProcess) -> dict[str, Any]:
         continue
 
       truths = None
+      truth_vars = None
       # If in training mode, get truth reads.
       if train_mode:
-        # Get truth haplotype alignment for labeling.
-        truth_reads = utils_make_images.filter_reads(
-            utils_make_images.get_reads_from_bam(truth_to_ref, interval),
-            encoding.get_truth_min_mapping_quality(),
-            allow_supplementary=True,
-        )
+        # If truth_vcf is provided, use it to get truth variants. In this case,
+        # we don't need truth_to_ref. truth_vars will contain all truth variants
+        # in the interval.
+        if truth_vcf:
+          truth_vars_reader = pysam.VariantFile(truth_vcf, mode='r')
+          truth_vars = list(
+              truth_vars_reader.fetch(
+                  interval.contig, interval.start, interval.stop
+              )
+          )
+        else:
+          # Get truth haplotype alignment for labeling.
+          truth_reads = utils_make_images.filter_reads(
+              utils_make_images.get_reads_from_bam(truth_to_ref, interval),
+              encoding.get_truth_min_mapping_quality(),
+              allow_supplementary=True,
+          )
 
-        # Skip intervals where the number of truth sequences does not equal the
-        # expected number, which is the ploidy.
-        if len(truth_reads) > ploidy:
-          run_summaries['skipped_too_many_truth_reads_counter'] += 1
-          continue
-        elif len(truth_reads) < ploidy:
-          run_summaries['skipped_too_few_truth_reads_counter'] += 1
-          continue
+          # Skip intervals where the number of truth sequences does not equal
+          #  the expected number, which is the ploidy.
+          if len(truth_reads) > ploidy:
+            run_summaries['skipped_too_many_truth_reads_counter'] += 1
+            continue
+          elif len(truth_reads) < ploidy:
+            run_summaries['skipped_too_few_truth_reads_counter'] += 1
+            continue
 
-        truths = truth_reads[0 : ploidy + 1]
+          truths = truth_reads[0 : ploidy + 1]
 
-        # Set truth reads' name so we can avoid using these reads during
-        # mismatch calculation. We don't expect any read from a sequencer to
-        # have truth_read as sequence name.
-        for t in truths:
-          t.query_name = 'truth_read'
+          # Set truth reads' name so we can avoid using these reads during
+          # mismatch calculation. We don't expect any read from a sequencer to
+          # have truth_read as sequence name.
+          for t in truths:
+            t.query_name = 'truth_read'
 
       # Get all reads.
       reads = utils_make_images.get_reads_from_bam(bam_file, interval)
@@ -983,6 +1211,8 @@ def run_process(options: OptionsForProcess) -> dict[str, Any]:
             ploidy=ploidy,
             bed_interval_regions=bed_regions,
             truths=truths,
+            truth_vars=truth_vars,
+            compose_by_haplotype=compose_by_haplotype,
         )
 
         produced_examples = []

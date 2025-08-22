@@ -49,8 +49,8 @@ a DNN model.
 """
 
 import collections
+from collections.abc import Sequence
 import multiprocessing
-from typing import Sequence
 
 from absl import flags
 from absl import logging
@@ -69,9 +69,15 @@ _BAM_FILE = flags.DEFINE_string(
 _FASTA_FILE = flags.DEFINE_string(
     'fasta', None, 'Input FASTA file of the reference/assembly.')
 _TRAINING_MODE = flags.DEFINE_boolean(
-    'training_mode', False, 'If set then training mode is enabled.'
+    'training_mode',
+    False,
+    'If set then training mode is enabled.'
     'Required inputs during training: '
-    'truth_to_ref, region_bed.')
+    'truth_to_ref or truth_vcf, and region_bed.',
+)
+_TRUTH_VCF = flags.DEFINE_string(
+    'truth_vcf', None, 'Input truth VCF file containing truth phased variants.'
+)
 _TRUTH_TO_REF = flags.DEFINE_string(
     'truth_to_ref', None, 'Input truth haplotype alignment to reference.')
 _REGION_BED = flags.DEFINE_string(
@@ -92,12 +98,22 @@ _OUTPUT = flags.DEFINE_string(
     ),
 )
 _CPUS = flags.DEFINE_integer(
-    'cpus', multiprocessing.cpu_count(),
-    'Number of worker processes to use. Use 0 to disable parallel processing. '
-    'Minimum of 2 CPUs required for parallel processing.')
+    'cpus',
+    multiprocessing.cpu_count(),
+    'Number of worker processes to use. If --task is set then this flag defines'
+    'the number of shards.'
+    'Minimum of 2 CPUs required for parallel processing.',
+)
+_TASK = flags.DEFINE_integer(
+    'task',
+    -1,
+    'Task ID of this task'
+    'If this flag is set to any number between 0 and cpus-1, then processing'
+    'is done in single process mode.',
+)
 _INTERVAL_SIZE = flags.DEFINE_integer(
-    'interval_size', 20000, 'Interval size used for processing the bam file.')
-
+    'interval_size', 20000, 'Interval size used for processing the bam file.'
+)
 # Experimental for diploid:
 _PLOIDY = flags.DEFINE_integer(
     'ploidy',
@@ -106,6 +122,12 @@ _PLOIDY = flags.DEFINE_integer(
         '[EXPERIMENTAL] Number of output sequences desired, e.g. 1 for '
         'haploid polishing and 2 for diploid variant calling.'
     ),
+)
+_COMPOSE_BY_HAPLOTYPE = flags.DEFINE_boolean(
+    'compose_by_haplotype',
+    False,
+    '[EXPERIMENTAL] If set then Examples will be divided by haplotype.',
+    required=False,
 )
 
 
@@ -117,46 +139,25 @@ def register_required_flags():
   ])
 
 
-def main(argv: Sequence[str]) -> None:
-  del argv
-  if _CPUS.value == 0:
-    raise ValueError('Must set cpus to >=1 for processing.')
+def run_multiprocess(
+    is_training: bool,
+    bed_regions_by_contig: dict[str, list[utils_make_images.RegionRecord]],
+    all_intervals: list[utils_make_images.RegionRecord],
+):
+  """Spawns a pool of workers that process the regions in parallel.
 
-  logging.info('MAKE IMAGES TOTAL CPUs: %d', _CPUS.value)
-
-  is_training = _TRAINING_MODE.value
-  if is_training:
-    # In training mode, these values must be passed:
-    missing_parameters = []
-    if _TRUTH_TO_REF.value is None:
-      missing_parameters.append('truth_to_ref')
-    if _REGION_BED.value is None:
-      missing_parameters.append('region_bed')
-    if missing_parameters:
-      missing_parameters_str = ', '.join(missing_parameters)
-      error_msg = ('Missing required parameters for training mode:'
-                   f' {missing_parameters_str!r}.')
-      raise ValueError(error_msg)
-    logging.info('Make images in mode: Training')
-  else:
-    logging.info('Make images in mode: Inference')
-
-  all_intervals = utils_make_images.get_contig_regions(
-      bam_file=_BAM_FILE.value,
-      fasta_file=_FASTA_FILE.value,
-      region=_REGION.value,
-      interval_length=_INTERVAL_SIZE.value,
-  )
-  bed_regions_by_contig = dict()
-  if _REGION_BED.value:
-    bed_regions_by_contig = utils_make_images.read_bed(_REGION_BED.value)
-
+  Args:
+    is_training: If true, labels are added to examples.
+    bed_regions_by_contig: dict of BED regions by contig.
+    all_intervals: list of intervals to process.
+  """
   arguments = []
   for process_id in range(0, _CPUS.value):
     options = region_processor.OptionsForProcess(
         bam_file=_BAM_FILE.value,
         fasta_file=_FASTA_FILE.value,
         truth_to_ref=_TRUTH_TO_REF.value,
+        truth_vcf=_TRUTH_VCF.value,
         bed_regions_by_contig=bed_regions_by_contig,
         all_intervals=all_intervals,
         train_mode=is_training,
@@ -164,6 +165,7 @@ def main(argv: Sequence[str]) -> None:
         process_id=process_id,
         cpus=_CPUS.value,
         ploidy=_PLOIDY.value,
+        compose_by_haplotype=_COMPOSE_BY_HAPLOTYPE.value,
     )
     arguments.append((options,))
 
@@ -193,8 +195,107 @@ def main(argv: Sequence[str]) -> None:
       _REGION, _OUTPUT, _CPUS, _INTERVAL_SIZE
   ]
   utils_make_images.write_summary(
-      total_summary_counts, _OUTPUT.value, is_training, flags_for_summary
+      total_summary_counts, _OUTPUT.value, is_training, flags_for_summary, None
   )
+
+
+def run_single_process(
+    is_training: bool,
+    bed_regions_by_contig: dict[str, list[utils_make_images.RegionRecord]],
+    all_intervals: list[utils_make_images.RegionRecord],
+):
+  """Calls run_process for a single shard.
+
+  Args:
+    is_training: If true, labels are added to examples.
+    bed_regions_by_contig: dict of BED regions by contig.
+    all_intervals: list of intervals to process.
+  """
+  options = region_processor.OptionsForProcess(
+      bam_file=_BAM_FILE.value,
+      fasta_file=_FASTA_FILE.value,
+      truth_to_ref=_TRUTH_TO_REF.value,
+      truth_vcf=_TRUTH_VCF.value,
+      bed_regions_by_contig=bed_regions_by_contig,
+      all_intervals=all_intervals,
+      train_mode=is_training,
+      output_filename=_OUTPUT.value,
+      process_id=_TASK.value,
+      cpus=_CPUS.value,
+      ploidy=_PLOIDY.value,
+      compose_by_haplotype=_COMPOSE_BY_HAPLOTYPE.value,
+  )
+
+  run_summaries = region_processor.run_process(options)
+
+  logging.info(
+      'Process %r: Total %r intervals processed and generated %r examples.',
+      _TASK.value,
+      run_summaries['interval_counter'],
+      run_summaries['example_counter'],
+  )
+
+  flags_for_summary = [
+      _BAM_FILE,
+      _FASTA_FILE,
+      _TRUTH_TO_REF,
+      _TRAINING_MODE,
+      _REGION_BED,
+      _REGION,
+      _OUTPUT,
+      _CPUS,
+      _INTERVAL_SIZE,
+  ]
+  utils_make_images.write_summary(
+      run_summaries, _OUTPUT.value, is_training, flags_for_summary, _TASK.value
+  )
+
+
+def main(argv: Sequence[str]) -> None:
+  del argv
+  if _CPUS.value == 0:
+    raise ValueError('Must set cpus to >=1 for processing.')
+
+  logging.info('MAKE IMAGES TOTAL CPUs: %d', _CPUS.value)
+
+  is_training = _TRAINING_MODE.value
+  if is_training:
+    # In training mode, these values must be passed:
+    missing_parameters = []
+    if _TRUTH_TO_REF.value and _TRUTH_VCF.value:
+      raise ValueError(
+          '--truth_to_ref and --truth_vcf cannot both be set together.'
+      )
+    if _TRUTH_TO_REF.value is None and _TRUTH_VCF.value is None:
+      missing_parameters.append('(truth_to_ref or truth_vcf)')
+    if _REGION_BED.value is None:
+      missing_parameters.append('region_bed')
+    if missing_parameters:
+      missing_parameters_str = ', '.join(missing_parameters)
+      error_msg = (
+          'Missing required parameters for training mode:'
+          f' {missing_parameters_str!r}.'
+      )
+      raise ValueError(error_msg)
+    logging.info('Make images in mode: Training')
+  else:
+    logging.info('Make images in mode: Inference')
+
+  all_intervals = utils_make_images.get_contig_regions(
+      bam_file=_BAM_FILE.value,
+      fasta_file=_FASTA_FILE.value,
+      region=_REGION.value,
+      interval_length=_INTERVAL_SIZE.value,
+  )
+  bed_regions_by_contig = dict()
+  if _REGION_BED.value:
+    bed_regions_by_contig = utils_make_images.read_bed(_REGION_BED.value)
+
+  # Start processing using multiprocessing.
+  if _TASK.value == -1:
+    run_multiprocess(is_training, bed_regions_by_contig, all_intervals)
+  else:
+    run_single_process(is_training, bed_regions_by_contig, all_intervals)
 
 
 if __name__ == '__main__':

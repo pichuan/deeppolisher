@@ -28,7 +28,7 @@
 """TF2 + tf.keras implementations of networks for polisher."""
 
 import logging
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 
 import ml_collections
 import tensorflow as tf
@@ -115,7 +115,7 @@ class EncoderOnlyTransformer(tf.keras.Model):
       )
     self.softmax = tf.keras.layers.Softmax()
 
-  def get_config(self) -> Dict[str, Any]:
+  def get_config(self) -> dict[str, Any]:
     return {
         'params': self.params,
     }
@@ -156,7 +156,7 @@ class EncoderOnlyTransformer(tf.keras.Model):
 
   def get_intermediate_outputs(
       self, inputs: tf.Tensor, training: bool
-  ) -> Dict[str, tf.Tensor]:
+  ) -> dict[str, tf.Tensor]:
     """Get intermediate outputs of the model.
 
     Args:
@@ -203,7 +203,7 @@ class EncoderOnlyTransformer(tf.keras.Model):
 
   def encode(
       self, inputs: tf.Tensor, attention_bias: tf.Tensor, training: bool
-  ) -> Dict[str, tf.Tensor]:
+  ) -> dict[str, tf.Tensor]:
     """Runs the input through Encoder stack and problem-specific layers."""
 
     with tf.name_scope('encode'):
@@ -322,7 +322,7 @@ class EncoderOnlyLearnedValuesTransformer(EncoderOnlyTransformer):
 
   def encode(
       self, inputs: tf.Tensor, attention_bias: tf.Tensor, training: bool
-  ) -> Dict[str, tf.Tensor]:
+  ) -> dict[str, tf.Tensor]:
     """Runs the input through Encoder stack and problem-specific layers."""
     # Input to embedding layer is [batch_size, length] and output will be
     # [batch_size, length, embedding_size]. Embed each row of the input

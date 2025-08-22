@@ -25,8 +25,6 @@
 # ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-"""Tests for google3.learning.genomics.polisher.models.data_providers."""
-
 import json
 
 from absl.testing import absltest
@@ -40,13 +38,13 @@ from polisher.models import data_providers
 def get_test_dataset(inference: bool) -> tuple[str, int]:
   """Loads inference or training dataset and json summary."""
   if inference:
-    dataset_path = 'tf_examples/haploid/inference/*.tfrecords.gz'
+    dataset_path = 'tf_examples/haploid/inference/*.tfrecord.gz'
     summary_json = (
         'tf_examples/haploid/inference/make_images_inference.summary.json'
     )
     size_key = 'example_counter'
   else:
-    dataset_path = 'tf_examples/haploid/train/*.tfrecords.gz'
+    dataset_path = 'tf_examples/haploid/train/*.tfrecord.gz'
     summary_json = 'tf_examples/haploid/train/make_images_training.summary.json'
     size_key = 'example_counter'
   file_pattern = test_utils.polisher_testdata(dataset_path)

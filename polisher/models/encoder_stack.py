@@ -31,7 +31,8 @@ Model paper: https://arxiv.org/pdf/1706.03762.pdf
 Transformer model code source: https://github.com/tensorflow/tensor2tensor
 """
 
-from typing import Any, Dict, Union, Iterable
+from collections.abc import Iterable
+from typing import Any, Union
 
 import ml_collections
 import tensorflow as tf
@@ -58,12 +59,12 @@ class PrePostProcessingWrapper(tf.keras.layers.Layer):
     )
     super().build(input_shape)
 
-  def get_config(self) -> Dict[str, Any]:
+  def get_config(self) -> dict[str, Any]:
     return {
         "params": self.params,
     }
 
-  def call(self, x: tf.Tensor, *args, **kwargs) -> Dict[str, tf.Tensor]:
+  def call(self, x: tf.Tensor, *args, **kwargs) -> dict[str, tf.Tensor]:
     """Calls wrapped layer with same parameters."""
     # Preprocessing: apply layer normalization
     training = kwargs["training"]
@@ -120,7 +121,7 @@ class EncoderStack(tf.keras.layers.Layer):
     )
     super().build(input_shape)
 
-  def get_config(self) -> Dict[str, Any]:
+  def get_config(self) -> dict[str, Any]:
     return {
         "params": self.params,
     }
@@ -131,7 +132,7 @@ class EncoderStack(tf.keras.layers.Layer):
       attention_bias: tf.Tensor,
       inputs_padding: tf.Tensor,
       training: bool,
-  ) -> Dict[str, tf.Tensor]:
+  ) -> dict[str, tf.Tensor]:
     """Return the output of the encoder layer stacks.
 
     Args:

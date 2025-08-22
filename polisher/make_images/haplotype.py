@@ -26,7 +26,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Haplotype handling for make examples."""
-from typing import Dict, List
 import pysam
 
 _ALLOWED_HP_TAGS = [0, 1, 2]
@@ -56,8 +55,8 @@ def get_read_haplotype_tag(read: pysam.AlignedSegment) -> int:
 
 
 def add_non_haplotype_reads_to_bins(
-    read_set: Dict[int, List[pysam.AlignedSegment]]
-) -> Dict[int, List[pysam.AlignedSegment]]:
+    read_set: dict[int, list[pysam.AlignedSegment]],
+) -> dict[int, list[pysam.AlignedSegment]]:
   """Add reads with missing hp tags to all tags for which we create examples.
 
   Missing haplotype tags are tags where either HP is 0 or none. If the value

@@ -30,16 +30,14 @@
 Example usage in this notebook: ../colab_utils_notebook.ipynb
 """
 
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
-import colorama
 import ml_collections
 import numpy as np
 import tensorflow as tf
 
 from polisher.make_images import encoding
 from polisher.models import model_utils
-from google3.third_party.nucleus.util import vis
 
 vocab = ''.join(encoding.get_vocab())
 vocab_lookup = np.vectorize(vocab.__getitem__)
@@ -48,8 +46,8 @@ vocab_lookup = np.vectorize(vocab.__getitem__)
 def initialize_model(
     checkpoint_path: str,
     params: ml_collections.ConfigDict,
-    example_shape: Tuple[int, int, int, int],
-) -> Tuple[Any, ml_collections.ConfigDict]:
+    example_shape: tuple[int, int, int, int],
+) -> tuple[Any, ml_collections.ConfigDict]:
   """Initializes the model and gathers parameters."""
   model_utils.modify_params(
       params=params,
@@ -70,8 +68,8 @@ def initialize_model(
 
 def load_model_from_checkpoint(
     checkpoint_path: str,
-    example_shape: Tuple[int, int, int, int] = (32, 121, 100, 1),
-) -> Tuple[Any, ml_collections.ConfigDict]:
+    example_shape: tuple[int, int, int, int] = (32, 121, 100, 1),
+) -> tuple[Any, ml_collections.ConfigDict]:
   """Loads the model from a checkpoint.
 
   Args:
@@ -90,22 +88,6 @@ def load_model_from_checkpoint(
       example_shape=example_shape,
   )
   return loaded_model, params
-
-
-def colorful(seq: Union[str, List[str]]) -> str:
-  """Add colors to a sequence of DNA."""
-  fore = colorama.Fore
-  background = colorama.Back
-  colors = {
-      'A': fore.GREEN,
-      'C': fore.BLUE,
-      'G': fore.YELLOW,
-      'T': fore.RED,
-      'X': fore.RED,
-  }
-  reset = fore.BLACK + background.RESET
-  colored_seq = [f'{colors.get(base, reset)}{base}{reset}' for base in seq]
-  return ''.join(colored_seq)
 
 
 def break_example_into_feature_rows(
@@ -140,133 +122,12 @@ FEATURE_TO_STRING = {
 }
 
 
-def diffs_colorful(ref: str) -> Callable[[Any], Any]:
-  """Add colors to a sequence of DNA if bases don't match the reference."""
-
-  def colorful_if_not_ref(decoded_str):
-    fore = colorama.Fore
-    background = colorama.Back
-    colors = {
-        'A': fore.GREEN,
-        'C': fore.BLUE,
-        'G': fore.YELLOW,
-        'T': fore.RED,
-        'X': fore.RED,
-    }
-    boring = fore.WHITE + background.RESET
-    reset = fore.BLACK + background.RESET
-    colored_seq = []
-    for base, ref_base in zip(decoded_str, ref):
-      if base != ref_base:
-        colored_seq.append(f'{colors.get(base, reset)}{base}{reset}')
-      else:
-        colored_seq.append(f'{boring}{base}{reset}')
-    return ''.join(colored_seq)
-
-  return colorful_if_not_ref
-
-
 def decode_to_string(row: np.ndarray, feature: str) -> str:
   decoded_row = [
       FEATURE_TO_STRING[feature][int(encoded_val)] for encoded_val in row
   ]
   decoded_str = ''.join(decoded_row)
   return decoded_str
-
-
-def visualize_features(
-    features: dict[str, Any],
-    labels: Optional[np.ndarray] = None,
-    predictions: Optional[np.ndarray] = None,
-    string_mode: bool = True,
-    only_acgt: bool = False,
-    highlights: bool = False,
-):
-  """Show a visualization based on the given info about an example."""
-  ref = decode_to_string(features['reference'][0, :], 'reference')
-  color_function = diffs_colorful(ref) if highlights else colorful
-
-  if predictions is not None:
-    if len(predictions.shape) == 1:
-      # pad haploid:
-      predictions = np.expand_dims(predictions, axis=0)
-    if string_mode:
-      for i in range(predictions.shape[0]):
-        decoded_prediction = [
-            FEATURE_TO_STRING['encoded_bases'][int(encoded_val)]
-            for encoded_val in predictions[i, :]
-        ]
-        print(f'Pred {i + 1}\t{color_function(decoded_prediction)}')
-    else:
-      print('Predictions:')
-      vis.array_to_png(predictions)
-  if labels is not None:
-    if len(labels.shape) == 1:
-      # pad haploid:
-      labels = np.expand_dims(labels, axis=0)
-    if string_mode:
-      for i in range(labels.shape[0]):
-        decoded_label = [
-            FEATURE_TO_STRING['encoded_bases'][int(encoded_val)]
-            for encoded_val in labels[i, :]
-        ]
-        print(f'Label {i + 1}\t{color_function(decoded_label)}')
-    else:
-      print('Labels:')
-      vis.array_to_png(labels)
-
-  for feature, rows in features.items():
-    # Show each feature as string if decoder exists, otherwise as a heatmap.
-    if only_acgt and feature not in ['reference', 'encoded_bases']:
-      continue
-    if string_mode and feature in FEATURE_TO_STRING:
-      for read_i, row in enumerate(rows):
-        decoded_str = decode_to_string(row, feature)
-        if feature == 'encoded_bases':
-          print(f'Read {read_i + 1}\t{color_function(decoded_str)}')
-        elif feature == 'reference':
-          print(f'Ref\t{colorful(decoded_str)}')
-        elif feature == 'encoded_match_mismatch':
-          print(f'M/X {read_i + 1}\t{colorful(decoded_str)}')
-        # elif feature == 'encoded_hp_tag':
-        #   print(f'HP {read_i + 1}\t', colorful(decoded_str))
-    else:
-      print(feature)
-      # Set vmin and vmax to actual min/max possible for the data type to
-      # standardize color scale between examples.
-      vis.array_to_png(rows)  # vmin=0, vmax=100
-
-
-def show_example(
-    batch: dict[str, Any],
-    example_i: int,
-    y_pred: Optional[np.ndarray] = None,
-    string_mode: bool = True,
-    only_acgt: bool = True,
-    highlights: bool = True,
-) -> None:
-  """Show an example in an easily human-readable way."""
-  print(batch['name'][example_i].numpy()[0].decode('utf-8'))
-  if 'labels' in batch:
-    labels = batch['labels'][example_i]
-  elif 'label' in batch:
-    labels = batch['label'][example_i]
-  else:
-    labels = None
-  features = break_example_into_feature_rows(batch['example'][example_i])
-  if y_pred is not None:
-    y_pred_bases = np.argmax(y_pred, axis=-1)
-    predictions = y_pred_bases[example_i]
-  else:
-    predictions = None
-  visualize_features(
-      features,
-      labels=labels,
-      predictions=predictions,
-      string_mode=string_mode,
-      only_acgt=only_acgt,
-      highlights=highlights,
-  )
 
 
 def to_acgt(encoded_array: np.ndarray, remove_gaps: bool = False) -> str:

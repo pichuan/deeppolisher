@@ -28,8 +28,7 @@
 """Architecture and training hyperparameters for networks."""
 # pylint: disable=line-too-long
 import os
-
-from typing import Optional, Dict
+from typing import Optional
 import ml_collections
 from polisher.make_images import encoding
 
@@ -44,7 +43,7 @@ def testdata_directory() -> str:
   return testdata_path
 
 
-def get_feature_hidden_size_map() -> Dict[str, int]:
+def get_feature_hidden_size_map() -> dict[str, int]:
   """Get hidden size defined for each feature."""
   feature_depths = encoding.get_feature_depths()
   feature_hidden_sizes = {

@@ -28,17 +28,18 @@
 """Utility functions being used for make images."""
 
 import collections
+from collections.abc import Iterable, Iterator, Sequence
 import dataclasses
 import json
 import os
-from typing import Dict, Iterable, Iterator, List, Sequence, Any
+from typing import Any, Optional
 
 from absl import logging
-
 import pysam
 import tensorflow as tf
 
 from polisher.make_images import haplotype
+from tensorflow.python.platform import gfile
 
 
 @dataclasses.dataclass
@@ -59,8 +60,9 @@ class RegionRecord:
                                                           self.start, self.stop)
 
 
-def get_contig_length(fasta_file: str, contig: str,
-                      common_contigs: List[str]) -> int:
+def get_contig_length(
+    fasta_file: str, contig: str, common_contigs: list[str]
+) -> int:
   """Returns length of a contig found in the fasta file.
 
   Args:
@@ -84,8 +86,9 @@ def get_contig_length(fasta_file: str, contig: str,
   return contig_length
 
 
-def parse_region_string(region_string: str, fasta_file: str,
-                        common_contigs: List[str]) -> RegionRecord:
+def parse_region_string(
+    region_string: str, fasta_file: str, common_contigs: list[str]
+) -> RegionRecord:
   """Takes string in "contig:start-stop" format and returns a RegionRecord.
 
   This function parses a string in format "contig:start-stop" and creates a
@@ -125,8 +128,9 @@ def parse_region_string(region_string: str, fasta_file: str,
   return region_record
 
 
-def parse_contig_string(region_string: str, fasta_file: str,
-                        common_contigs: List[str]) -> RegionRecord:
+def parse_contig_string(
+    region_string: str, fasta_file: str, common_contigs: list[str]
+) -> RegionRecord:
   """Takes string in format "contig" and returns a RegionRecord.
 
   This function parses a string in format "contig" and creates a
@@ -153,8 +157,9 @@ def parse_contig_string(region_string: str, fasta_file: str,
   return region_record
 
 
-def process_region_string(region_string: str, fasta_file: str,
-                          common_contigs: List[str]) -> RegionRecord:
+def process_region_string(
+    region_string: str, fasta_file: str, common_contigs: list[str]
+) -> RegionRecord:
   """Takes region string and returns a RegionRecord.
 
   User can define the region in two ways:
@@ -184,7 +189,7 @@ def process_region_string(region_string: str, fasta_file: str,
     return parse_contig_string(region_string, fasta_file, common_contigs)
 
 
-def read_bed(bed_file: str) -> Dict[str, List[RegionRecord]]:
+def read_bed(bed_file: str) -> dict[str, list[RegionRecord]]:
   """Reads in bed file and returns a dictionary of RegionRecord lists.
 
   This function reads in a bed file and creates a dictionary where the keys are
@@ -208,7 +213,7 @@ def read_bed(bed_file: str) -> Dict[str, List[RegionRecord]]:
     ValueError: If bed file has an invalid entry.
   """
   region_records_by_contig = dict()
-  with open(bed_file, 'r') as bedfile:
+  with gfile.Open(bed_file, 'r') as bedfile:
     for line in bedfile:
       if len(line.strip().split('\t')) < 3:
         raise ValueError('Invalid entry in BED file.')
@@ -225,8 +230,9 @@ def read_bed(bed_file: str) -> Dict[str, List[RegionRecord]]:
   return region_records_by_contig
 
 
-def split_regions_in_intervals(regions: List[RegionRecord],
-                               region_length: int) -> List[RegionRecord]:
+def split_regions_in_intervals(
+    regions: list[RegionRecord], region_length: int
+) -> list[RegionRecord]:
   """Splits each region into intervals of region length.
 
   Given a list of region: [(chr20, 0, 1000)] and an region_length=500 this
@@ -250,8 +256,9 @@ def split_regions_in_intervals(regions: List[RegionRecord],
   return all_intervals
 
 
-def get_contig_regions(bam_file: str, fasta_file: str, region: str,
-                       interval_length: int) -> List[RegionRecord]:
+def get_contig_regions(
+    bam_file: str, fasta_file: str, region: str, interval_length: int
+) -> list[RegionRecord]:
   """Creates a list of regions for processing.
 
   Reads contig names from bam and fasta file and creates a list of regions
@@ -307,8 +314,9 @@ def get_contig_regions(bam_file: str, fasta_file: str, region: str,
   return region_intervals
 
 
-def range_intersect(interval: RegionRecord,
-                    bed_intervals: List[RegionRecord]) -> List[RegionRecord]:
+def range_intersect(
+    interval: RegionRecord, bed_intervals: list[RegionRecord]
+) -> list[RegionRecord]:
   """Intersect a given interval with intervals we get from a bed file.
 
   Takes an interval and creates an intersection with the intervals contained in
@@ -378,8 +386,9 @@ def get_process_intervals(all_intervals: Sequence[RegionRecord],
       yield interval
 
 
-def get_reads_from_bam(bam_file: str,
-                       interval: RegionRecord) -> List[pysam.AlignedSegment]:
+def get_reads_from_bam(
+    bam_file: str, interval: RegionRecord
+) -> list[pysam.AlignedSegment]:
   """Get a list of reads from a bam file within a region.
 
   Args:
@@ -416,8 +425,8 @@ def get_reference_sequence_from_fasta(fasta_file: str, interval: RegionRecord,
 
 
 def bin_reads_by_haplotype(
-    reads: Iterable[pysam.AlignedSegment]
-) -> Dict[int, List[pysam.AlignedSegment]]:
+    reads: Iterable[pysam.AlignedSegment],
+) -> dict[int, list[pysam.AlignedSegment]]:
   """Bin reads by their associated haplotype tag.
 
   The human genome is diploid (we have two chromosomes, one inherited from
@@ -448,8 +457,9 @@ def bin_reads_by_haplotype(
   return read_haplotype_dictionary
 
 
-def check_if_position_is_within_regions(position: int,
-                                        intervals: List[RegionRecord]) -> bool:
+def check_if_position_is_within_regions(
+    position: int, intervals: list[RegionRecord]
+) -> bool:
   """Checks if a position is within given bed intervals.
 
   This method is used to see if active_positions are contained within provided
@@ -477,9 +487,10 @@ def check_if_position_is_within_regions(position: int,
 
 
 def filter_reads(
-    reads: List[pysam.AlignedSegment],
+    reads: list[pysam.AlignedSegment],
     mapping_quality_threshold: int,
-    allow_supplementary: bool = False) -> List[pysam.AlignedSegment]:
+    allow_supplementary: bool = False,
+) -> list[pysam.AlignedSegment]:
   """Filter reads and split them  haplotype tag.
 
   Reads are filtered if they are duplicate, qc_failed, secordary, unmapped
@@ -512,15 +523,20 @@ def filter_reads(
   return filtered_reads
 
 
-def write_tf_record(tf_examples: List[bytes], tf_writer: tf.io.TFRecordWriter):
+def write_tf_record(tf_examples: list[bytes], tf_writer: tf.io.TFRecordWriter):
   """Writes tf examples to a file."""
   for tf_example in tf_examples:
     tf_writer.write(tf_example)
   tf_writer.flush()
 
 
-def write_summary(run_summary: Dict[str, Any], output_filename: str,
-                  is_training: bool, flags: Sequence[Any]):
+def write_summary(
+    run_summary: dict[str, Any],
+    output_filename: str,
+    is_training: bool,
+    flags: Sequence[Any],
+    process_id: Optional[int] = None,
+):
   """Writes a json file given a set of flags and summary of the run.
 
   Args:
@@ -528,14 +544,20 @@ def write_summary(run_summary: Dict[str, Any], output_filename: str,
     output_filename: Name of the output file.
     is_training: True if training mode is true.
     flags: List of flags to dump in the summary json.
+    process_id: Task/Shard number.
   """
   # Write the summary of the run.
   summary_name = 'training' if is_training else 'inference'
   # Replace the output extension to json.
-  summary_filename = f'{output_filename}_{summary_name}.summary.json'
-
+  if process_id:
+    summary_filename = (
+        f'{output_filename}_{summary_name}.summary_{process_id}.json'
+    )
+  else:
+    summary_filename = f'{output_filename}_{summary_name}.summary.json'
   logging.info('Writing %s.', summary_filename)
   tf.io.gfile.makedirs(os.path.dirname(summary_filename))
+
   with tf.io.gfile.GFile(summary_filename, 'w') as summary_file:
     summary = {flag.name: flag.value for flag in flags}
     summary.update(dict(run_summary.items()))

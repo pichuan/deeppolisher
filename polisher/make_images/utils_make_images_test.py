@@ -25,13 +25,11 @@
 # ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-"""Tests for google3.learning.genomics.deepconsensus.preprocess.preprocess_utils."""
-
 import collections
 import dataclasses
 import json
 import os
-from typing import Any, List, Tuple
+from typing import Any
 
 from absl.testing import absltest
 from absl.testing import flagsaver
@@ -69,10 +67,10 @@ class ReadAttributes:
   query_sequence: str
   contig: str
   start: int
-  base_qualities: List[int]
+  base_qualities: list[int]
   mapping_quality: int
-  cigartuples: List[Tuple[int, int]]
-  tags: List[Tuple[str, Any]]
+  cigartuples: list[tuple[int, int]]
+  tags: list[tuple[str, Any]]
 
 
 class Test(parameterized.TestCase):

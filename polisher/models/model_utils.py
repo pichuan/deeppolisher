@@ -32,7 +32,7 @@ import io
 import json
 import logging
 import os
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import ml_collections
 import numpy as np
@@ -74,7 +74,7 @@ def get_loss(
 
 def get_per_class_accuracy_metrics(
     name_prefix: str = '',
-) -> List[tf.keras.metrics.Metric]:
+) -> list[tf.keras.metrics.Metric]:
   """Get one metric for each vocab token with basic accuracy."""
   vocab = encoding.get_vocab()
   gap_token = encoding.get_gap_token()
@@ -94,7 +94,7 @@ def get_per_class_accuracy_metrics(
 
 def get_metrics(
     name_prefix: str = '', ploidy: int = 1
-) -> List[tf.keras.metrics.Metric]:
+) -> list[tf.keras.metrics.Metric]:
   """Returns the metrics to use for training and evaluation."""
   if ploidy == 1:
     return [
@@ -125,12 +125,12 @@ def get_metrics(
     raise ValueError('ploidy must be 1 or 2.')
 
 
-def get_record_shape(dataset_path: str) -> List[int]:
+def get_record_shape(dataset_path: str) -> list[int]:
   """Returns an array that represents the shape of records in the given path.
 
   Input `dataset_path` should look something like
   /path/to/data/train/train, where the actual TFRecords are named something
-  like /path/to/data/train/train-00228-of-00724.tfrecords.gz
+  like /path/to/data/train/train-00228-of-00724.tfrecord.gz
 
   Args:
     dataset_path: string representing the sharded path for TFRecords. These
@@ -342,7 +342,7 @@ def run_inference_and_write_results(
 
 
 def print_model_summary(
-    model: tf.keras.Model, input_shape: Tuple[int, int, int, int]
+    model: tf.keras.Model, input_shape: tuple[int, int, int, int]
 ) -> None:
   """Runs a forward pass with dummy data then prints the model summary."""
   # Without calling this forward pass, we won't be able to print the summary.
@@ -391,7 +391,7 @@ def save_params_as_json(
 
 def get_datasets(
     params: ml_collections.ConfigDict, strategy: tf.distribute.Strategy
-) -> Tuple[tf.distribute.DistributedDataset, tf.distribute.DistributedDataset]:
+) -> tuple[tf.distribute.DistributedDataset, tf.distribute.DistributedDataset]:
   """Returns datasets for training and evaluation."""
 
   train_input_fn = data_providers.create_input_fn(
@@ -417,7 +417,7 @@ def get_datasets(
 
 def get_step_counts(
     params: ml_collections.ConfigDict, eval_and_log_every_step: bool
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
   """Returns the steps for training and evaluation."""
 
   if eval_and_log_every_step:
@@ -438,7 +438,7 @@ def get_checkpoint_and_initial_epoch(
     optimizer: tf.keras.optimizers.Optimizer,
     out_dir: str,
     eval_checkpoint: str,
-) -> Tuple[tf.train.Checkpoint, int, int]:
+) -> tuple[tf.train.Checkpoint, int, int]:
   """Loads a checkpoint if available and sets epoch to start training."""
   initial_epoch = 0
   initial_step_train = 0
@@ -465,7 +465,7 @@ def get_checkpoint_and_initial_epoch(
   return checkpoint, initial_epoch, initial_step_train
 
 
-def reset_all_metrics(metrics: List[tf.keras.metrics.Metric]) -> None:
+def reset_all_metrics(metrics: list[tf.keras.metrics.Metric]) -> None:
   """Resets the values of provided metrics."""
   for metric in metrics:
     metric.reset_states()
@@ -477,7 +477,7 @@ def log_and_save_metrics(
     step: int,
     total_steps: int,
     optimizer: tf.keras.optimizers.Optimizer,
-    metrics: List[tf.keras.metrics.Metric],
+    metrics: list[tf.keras.metrics.Metric],
     training: bool,
     steps_per_second: float,
 ) -> None:
@@ -508,7 +508,7 @@ def log_and_save_metrics(
     metric.reset_states()
 
 
-def write_row(handle: Union[io.TextIOWrapper], row: List[Any]) -> None:
+def write_row(handle: Union[io.TextIOWrapper], row: list[Any]) -> None:
   """Formats an array as tab-delimited and writes."""
   handle.write('\t'.join(map(str, row)) + '\n')
 
@@ -516,7 +516,7 @@ def write_row(handle: Union[io.TextIOWrapper], row: List[Any]) -> None:
 def save_checkpoint(
     checkpoint: tf.train.Checkpoint,
     out_dir: str,
-    eval_metrics: List[tf.keras.metrics.Metric],
+    eval_metrics: list[tf.keras.metrics.Metric],
     write_checkpoint_metrics: bool,
 ) -> str:
   """Save checkpoint and return its name."""

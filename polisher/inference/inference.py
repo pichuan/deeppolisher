@@ -55,9 +55,9 @@ time blaze run -c opt \
 
 import collections
 import dataclasses
-import multiprocessing
 import os
 import random
+from typing import Callable, List
 
 from absl import flags
 from absl import logging
@@ -67,8 +67,10 @@ import numpy as np
 import pysam
 import tensorflow as tf
 
+from polisher.inference import classic_assembler
 from polisher.inference import inference_utils
 from polisher.inference import vcf_writer
+from polisher.make_images import encoding
 from polisher.models import data_providers
 from polisher.models import model_utils
 from absl import app
@@ -82,6 +84,9 @@ _PARAMS = config_flags.DEFINE_config_file(
 
 _INPUT_DIR = flags.DEFINE_string(
     'input_dir', None, 'Path to input directory with example images.'
+)
+_INPUT_PATH = flags.DEFINE_string(
+    'input_path', None, 'Path to the file containing examples.'
 )
 _CHECKPOINT = flags.DEFINE_string(
     'checkpoint', None, 'Path to checkpoint that will be loaded in.'
@@ -114,13 +119,23 @@ _WRITE_EVERY_N_BATCH = flags.DEFINE_integer(
     500,
     'Write predictions after write_every_n_batch batches. Default: 500.',
 )
+_TASK = flags.DEFINE_integer(
+    'task',
+    -1,
+    'Task ID of this task'
+    'If this flag is set to any number between 0 and cpus-1, then processing'
+    'is done in single process mode.',
+)
+_USE_CLASSIC_ASSEMBLER = flags.DEFINE_boolean(
+    'use_classic_assembler',
+    False,
+    'If true, use the classic EM-based assembler instead of the deep learning '
+    'model. The --checkpoint flag will be ignored.',
+)
 
 
 def register_required_flags():
-  flags.mark_flags_as_required([
-      'out_dir',
-      'checkpoint',
-  ])
+  flags.mark_flags_as_required(['out_dir'])
 
 
 @dataclasses.dataclass
@@ -139,6 +154,102 @@ class PostProcessExample:
   y_preds: np.ndarray
   quality_scores: np.ndarray
   thread_id: int
+
+
+# --- Helpers for classic assembler predictor ---
+# Build maps dynamically from the encoding module to stay in sync.
+DECODING_MAP = {i: c for i, c in enumerate(encoding.get_vocab())}
+ENCODING_MAP = {c: i for i, c in DECODING_MAP.items()}
+GAP_TOKEN = encoding.get_gap_token()
+
+
+def decode_sequence(encoded_seq_1d: np.ndarray) -> str:
+  """Decodes a 1D numpy array of integers into a sequence string."""
+  return ''.join([DECODING_MAP.get(int(val), '?') for val in encoded_seq_1d])
+
+
+def decode_reads(encoded_reads_tensor: tf.Tensor) -> List[str]:
+  """Decodes a pileup tensor into a list of read strings."""
+  max_coverage = encoding.get_max_coverage()
+  reads_tensor_sliced = encoded_reads_tensor[:max_coverage, :, :]
+  if reads_tensor_sliced.shape[-1] == 1:
+    reads_tensor_sliced = tf.squeeze(reads_tensor_sliced, axis=-1)
+  encoded_reads_np = reads_tensor_sliced.numpy()
+  return [decode_sequence(row) for row in encoded_reads_np]
+
+
+def decode_feature(
+    encoded_reads_tensor: tf.Tensor, feature_order: int
+) -> List[np.ndarray]:
+  """Decodes a pileup tensor into a list of read strings."""
+  max_coverage = encoding.get_max_coverage()
+  start_index = feature_order * max_coverage + 1
+  end_index = (feature_order + 1) * max_coverage
+  reads_tensor_sliced = encoded_reads_tensor[start_index:end_index, :, :]
+  if reads_tensor_sliced.shape[-1] == 1:
+    reads_tensor_sliced = tf.squeeze(reads_tensor_sliced, axis=-1)
+  return list(reads_tensor_sliced.numpy())
+
+
+# The following block is internal because it is still being developed.
+def predict_with_classic_assembler(
+    example_batch: dict[str, tf.Tensor],
+) -> tuple[np.ndarray, np.ndarray]:
+  """Generates predictions for a batch using `assemble_haplotypes_fn`."""
+  batch_size = example_batch['example'].shape[0]
+  all_y_preds, all_quality_scores = [], []
+  haplotype_length = encoding.get_window_length()
+
+  for i in range(batch_size):
+    # Extract and decode data for one example
+    reads_tensor = example_batch['example'][i]
+    reads_data = decode_reads(reads_tensor)
+    base_quality_scores = decode_feature(reads_tensor, feature_order=2)
+    mapping_quality_scores = decode_feature(reads_tensor, feature_order=3)
+    read_haplotypes = decode_feature(reads_tensor, feature_order=4)
+
+    ref_tensor = tf.squeeze(example_batch['encoded_reference'][i]).numpy()
+    reference_seq = decode_sequence(ref_tensor)
+
+    # Call the classic assembler. Config can be passed from flags if needed.
+    hap1_str, hap2_str = classic_assembler.assemble_haplotypes_fn(
+        reads_data,
+        reference_seq,
+        base_quality_scores,
+        mapping_quality_scores,
+        read_haplotypes,
+        {},
+    )
+
+    # Encode the output haplotypes back to numpy array format
+    hap1_encoded = [
+        ENCODING_MAP.get(c, ENCODING_MAP[GAP_TOKEN]) for c in hap1_str
+    ]
+    hap2_encoded = [
+        ENCODING_MAP.get(c, ENCODING_MAP[GAP_TOKEN]) for c in hap2_str
+    ]
+    y_pred = np.array([
+        np.pad(
+            hap1_encoded,
+            (0, haplotype_length - len(hap1_encoded)),
+            'constant',
+            constant_values=ENCODING_MAP[GAP_TOKEN],
+        ),
+        np.pad(
+            hap2_encoded,
+            (0, haplotype_length - len(hap2_encoded)),
+            'constant',
+            constant_values=ENCODING_MAP[GAP_TOKEN],
+        ),
+    ])[:, :haplotype_length]
+    all_y_preds.append(y_pred)
+
+    # Generate dummy quality scores as a NumPy array.
+    dummy_q = np.full((2, haplotype_length), 60.0, dtype=np.float32)
+    all_quality_scores.append(dummy_q)
+  return np.array(all_y_preds), np.array(all_quality_scores)
+
+# +++ END: Classic Assembler Function and Helpers +++
 
 
 def post_processing(
@@ -176,16 +287,16 @@ def post_processing(
 
 
 def run_inference(
-    model: tf.keras.Model,
+    predictor: Callable[[dict[str, tf.Tensor]], tuple[np.ndarray, np.ndarray]],
     out_dir: str,
     ref_file: str,
     sample_name: str,
     limit: int = -1,
 ) -> None:
-  """Runs inference with given model and dataset and writes out results.
+  """Runs inference with a given predictor and dataset and writes results.
 
   Args:
-    model: A trained keras model used to run inference with.
+    predictor: A function used to run inference with.
     out_dir: Path to output directory.
     ref_file: Path to reference or assembly fasta file.
     sample_name: Name of sample to be used in the VCF.
@@ -193,16 +304,21 @@ def run_inference(
   """
   # Create output summary and vcf file.
   run_summaries = {'total_windows': 0, 'total_variants': 0}
+  if _TASK.value > -1:
+    filename = f'polisher_output_{_TASK.value}.unsorted'
+    data_set_path = _INPUT_PATH.value
+  else:
+    filename = 'polisher_output.unsorted'
+    data_set_path = os.path.join(_INPUT_DIR.value, '*tfrecord.gz')
   vcf_file_writer = vcf_writer.VCFWriter(
       reference_file_path=ref_file,
       sample_name=sample_name,
       output_dir=out_dir,
-      filename='polisher_output.unsorted',
+      filename=filename,
   )
+  logging.info('Inference: Reading from data_set_path: %s', data_set_path)
   logs_file_path = os.path.join(out_dir, 'inference' + '.log')
   logs_file = tf.io.gfile.GFile(logs_file_path, 'w')
-
-  data_set_path = _INPUT_DIR.value + '/*tfrecords.gz'
 
   dataset = data_providers.get_dataset(
       file_pattern=data_set_path,
@@ -223,13 +339,8 @@ def run_inference(
         batch_counter + 1,
     )
     run_summaries['total_windows'] += len(example['example'])
-    # Do model prediction and get the output from the model.
-    softmax_output = model.predict_on_batch(example['example'])
-    y_preds = np.argmax(softmax_output, axis=-1)
-    error_prob = 1 - np.max(softmax_output, axis=-1)
-    quality_scores = -10 * np.log10(error_prob)
-    quality_scores = np.round(quality_scores, decimals=0)
-    quality_scores = quality_scores.astype(dtype=np.int32).tolist()
+    y_preds, quality_scores_np = predictor(example)
+    quality_scores = quality_scores_np.tolist()
     post_process_example = PostProcessExample(
         ref_file=ref_file,
         example=example,
@@ -245,10 +356,15 @@ def run_inference(
           'Inference: Starting post-processing on %d batches.',
           len(predicted_batches),
       )
-      with multiprocessing.Pool(processes=_CPUS.value) as pool:
-        variants_list = list(pool.map(post_processing, predicted_batches))
-        pool.close()
-        pool.join()
+      if _TASK.value == -1:
+        with multiprocessing.Pool(processes=_CPUS.value) as pool:
+          variants_list = list(pool.map(post_processing, predicted_batches))
+          pool.close()
+          pool.join()
+      else:
+        variants_list = []
+        for post_process_example in predicted_batches:
+          variants_list.append(post_processing(post_process_example))
       logging.info(
           'Inference: Post-processing finished on %d batches.',
           len(predicted_batches),
@@ -263,10 +379,16 @@ def run_inference(
         'Inference: Starting post-processing on %d batches.',
         len(predicted_batches),
     )
-    with multiprocessing.Pool(processes=_CPUS.value) as pool:
-      variants_list = list(pool.map(post_processing, predicted_batches))
-      pool.close()
-      pool.join()
+    if _TASK.value == -1:
+      with multiprocessing.Pool(processes=_CPUS.value) as pool:
+        variants_list = list(pool.map(post_processing, predicted_batches))
+        pool.close()
+        pool.join()
+    else:
+      variants_list = []
+      for post_process_example in predicted_batches:
+        variants_list.append(post_processing(post_process_example))
+
     logging.info(
         'Inference: Post-processing finished on %d batches.',
         len(predicted_batches),
@@ -292,7 +414,7 @@ def run_inference(
   )
 
 
-def setup_inference(
+def setup_model_inference(
     out_dir: str,
     params: ml_collections.ConfigDict,
     checkpoint_path: str,
@@ -329,8 +451,21 @@ def setup_inference(
         checkpoint_path
     ).expect_partial().assert_existing_objects_matched()
 
+    def model_predictor(
+        example_batch: dict[str, tf.Tensor],
+    ) -> tuple[np.ndarray, np.ndarray]:
+      """Generates predictions for a batch using the loaded TF model."""
+      # Do model prediction and get the output from the model.
+      softmax_output = model.predict_on_batch(example_batch['example'])
+      y_preds = np.argmax(softmax_output, axis=-1)
+      error_prob = 1 - np.max(softmax_output, axis=-1)
+      quality_scores = -10 * np.log10(error_prob)
+      quality_scores = np.round(quality_scores, decimals=0)
+      quality_scores = quality_scores.astype(dtype=np.int32)
+      return y_preds, quality_scores
+
     run_inference(
-        model=model,
+        predictor=model_predictor,
         out_dir=out_dir,
         ref_file=ref_file,
         sample_name=sample_name,
@@ -340,34 +475,52 @@ def setup_inference(
 
 def main(unused_args=None):
   """Set up parallel processing and run inference."""
-  if not _PARAMS.value:
+  if _USE_CLASSIC_ASSEMBLER.value:
+    params = ml_collections.ConfigDict()
+  elif not _PARAMS.value:
     params = model_utils.read_params_from_json(
         checkpoint_path=_CHECKPOINT.value
     )
   else:
     params = _PARAMS.value
 
-  # If ploidy is not set then we assume the model is haploid.
   if 'ploidy' not in params.keys():
     params.ploidy = 1
+  if _USE_CLASSIC_ASSEMBLER.value:
+    params.ploidy = 2
 
   # Set eval path in parameter.
-  params.eval_path = _INPUT_DIR.value + '/*tfrecords.gz'
+  if _TASK.value > -1:
+    params.eval_path = _INPUT_PATH.value
+  else:
+    params.eval_path = os.path.join(_INPUT_DIR.value, '*tfrecord.gz')
 
   # Create the output directory if doesn't exist.
   if not tf.io.gfile.isdir(_OUT_DIR.value):
     tf.io.gfile.makedirs(_OUT_DIR.value)
 
-  setup_inference(
-      out_dir=_OUT_DIR.value,
-      params=params,
-      checkpoint_path=_CHECKPOINT.value,
-      ref_file=_REF_FASTA.value,
-      sample_name=_SAMPLE_NAME.value,
-      limit=_LIMIT.value,
-  )
+  if _USE_CLASSIC_ASSEMBLER.value:
+    logging.info('Running inference with the classic assembler.')
+    run_inference(
+        predictor=predict_with_classic_assembler,
+        out_dir=_OUT_DIR.value,
+        ref_file=_REF_FASTA.value,
+        sample_name=_SAMPLE_NAME.value,
+        limit=_LIMIT.value,
+    )
+  else:
+    logging.info('Running inference with the TensorFlow model.')
+    setup_model_inference(
+        out_dir=_OUT_DIR.value,
+        params=params,
+        checkpoint_path=_CHECKPOINT.value,
+        ref_file=_REF_FASTA.value,
+        sample_name=_SAMPLE_NAME.value,
+        limit=_LIMIT.value,
+    )
 
 
 if __name__ == '__main__':
   logging.use_python_logging()
+  register_required_flags()
   app.run(main)

@@ -26,7 +26,6 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Encoding methods for make examples."""
-from typing import List, Dict
 
 # ENCODINGS
 # Base encoding of gap ('*') and pad (' ') is considered the same
@@ -108,12 +107,12 @@ def get_max_allowed_reads_in_region() -> int:
   return _MAX_ALLOWED_READS_IN_REGION
 
 
-def get_valid_bases() -> List[str]:
+def get_valid_bases() -> list[str]:
   """Returns the valid bases."""
   return _VALID_BASES
 
 
-def get_feature_depths() -> Dict[str, int]:
+def get_feature_depths() -> dict[str, int]:
   """Returns the set of features used and the coverage per feature."""
   feature_rows = {
       'reference': 1,
@@ -135,7 +134,7 @@ def get_max_coverage() -> int:
   return _MAX_COVERAGE_PER_HAPLOTYPE
 
 
-def get_max_encoding_value_by_feature() -> Dict[str, int]:
+def get_max_encoding_value_by_feature() -> dict[str, int]:
   """Return maximum value used to represent each feature."""
   max_encoding_value = {
       'reference': max(_BASE_ENCODINGS.values()),
@@ -159,7 +158,7 @@ def get_vocab_size() -> int:
   return len(_BASE_ENCODINGS.items())
 
 
-def get_vocab() -> List[str]:
+def get_vocab() -> list[str]:
   """Return the prediction vocabulary used."""
   return list(_BASE_ENCODINGS.keys())
 

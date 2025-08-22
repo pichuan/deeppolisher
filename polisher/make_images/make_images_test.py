@@ -25,8 +25,6 @@
 # ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-"""Tests for make_images."""
-
 import json
 import os
 
@@ -170,6 +168,31 @@ class MakeImagesE2ETest(parameterized.TestCase):
               "skipped_too_many_reads_counter": 0,
           },
       ),
+      dict(
+          expected_total_examples=3,
+          flag_values={
+              "bam": "HG002.pfda_challenge.grch38.phased.chr20_0-200000.bam",
+              "fasta": "GRCh38_chr20_0_200000.fa",
+              "region_bed": (
+                  "HG002_GRCh38_1_22_v4.2.1_benchmark.chr20_0_200000.bed"
+              ),
+              "truth_to_ref": "truth_to_ref.chr20_0-200000.bam",
+              "is_training": True,
+              "cpus": 1,
+              "region": "chr20:100000-101000",
+              "interval_size": 100,
+              "ploidy": 2,
+              "compose_by_haplotype": True,
+          },
+          expected_summary_counters={
+              "interval_counter": 10,
+              "example_counter": 3,
+              "skipped_outside_bed_counter": 0,
+              "skipped_too_few_truth_reads_counter": 0,
+              "skipped_too_many_truth_reads_counter": 0,
+              "skipped_too_many_reads_counter": 0,
+          },
+      ),
   )
   @flagsaver.flagsaver
   def test_make_images_golden(
@@ -191,13 +214,14 @@ class MakeImagesE2ETest(parameterized.TestCase):
     FLAGS.training_mode = flag_values["is_training"]
     FLAGS.cpus = flag_values["cpus"]
     FLAGS.ploidy = flag_values["ploidy"]
+    FLAGS.compose_by_haplotype = flag_values.get("compose_by_haplotype", False)
 
     # Run make_images with the flags above:
     make_images.main([])
 
     # Read output tfrecords:
     dataset = data_providers.get_dataset(
-        file_pattern=f"{output}_*.tfrecords.gz",
+        file_pattern=f"{output}_*.tfrecord.gz",
         inference=not flag_values["is_training"],
         ploidy=flag_values["ploidy"],
         batch_size=32,

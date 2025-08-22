@@ -28,7 +28,7 @@
 """Methods for polisher inference step."""
 
 import dataclasses
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 from absl import logging
 import numpy as np
 import pysam
@@ -37,7 +37,7 @@ from polisher.make_images import encoding
 
 
 vocab = ''.join(encoding.get_vocab())
-vocab_lookup = np.vectorize(vocab.__getitem__)
+vocab_array = np.array(list(vocab))
 
 
 @dataclasses.dataclass
@@ -58,7 +58,7 @@ def create_running_variant(
     index: int,
     ref_base: str,
     pred_base: str,
-    ref_base_dictionary: dict[Tuple[int, int], str],
+    ref_base_dictionary: dict[tuple[int, int], str],
     qual: float,
 ) -> Variant:
   """Returns a Variant object from given reference base and prediction base.
@@ -153,7 +153,7 @@ def get_variants_from_prediction(
     positions: list[int],
     indices: list[int],
     quality_scores: list[float],
-    ref_base_dictionary: dict[Tuple[int, int], str],
+    ref_base_dictionary: dict[tuple[int, int], str],
 ) -> list[Variant]:
   """Given a reference sequence and a prediction sequence, generate variants.
 
@@ -206,6 +206,9 @@ def get_variants_from_prediction(
       len(quality_scores),
   )
 
+  # Convert the list to a set for fast O(1) lookups.
+  active_position_set = set(active_position)
+
   # Create a running variant to consolidate variants together, like inserts
   # or deletes that run for multiple positions.
   current_variant = None
@@ -224,7 +227,7 @@ def get_variants_from_prediction(
     # Any variant upstream of active_position is not considered. This is to
     # avoid boundary issues on the left side of the window.
     # We only extend variant if it's a running variant.
-    if position not in active_position and not current_variant:
+    if position not in active_position_set and not current_variant:
       continue
 
     # If we are at the backbone of the reference sequence but it doesn't have
@@ -440,7 +443,7 @@ def variants_from_example(
     A list of variant(s) found in the given example.
   """
   contig = batch['contig'][example_i]
-  active_position = batch['active_position'][example_i]
+  active_position_tensor = batch['active_position'][example_i]
   encoded_reference = batch['encoded_reference'][example_i]
   reference_positions = batch['reference_positions'][example_i]
   reference_indices = batch['reference_indices'][example_i]
@@ -449,7 +452,7 @@ def variants_from_example(
 
   contig_name = contig.numpy()[0].decode('utf-8')
   reference_sequence = ''.join(
-      vocab_lookup(np.squeeze(encoded_reference, axis=0))
+      vocab_array[np.squeeze(encoded_reference, axis=0)]
   )
   ref_pos_start = max(0, min(reference_positions.numpy().tolist()) - 5)
   ref_pos_end = max(reference_positions.numpy().tolist()) + 5
@@ -465,14 +468,12 @@ def variants_from_example(
     ploidy = 1  # haploid.
 
   if ploidy == 1:
-    prediction_sequence = ''.join(
-        np.vectorize(vocab.__getitem__)(predicted_vector)
-    )
+    prediction_sequence = ''.join(vocab_array[predicted_vector])
     variants = get_variants_from_prediction(
         contig=contig_name,
         reference_sequence=reference_sequence,
         prediction_sequence=prediction_sequence,
-        active_position=active_position.numpy(),
+        active_position=active_position_tensor.numpy(),
         positions=reference_positions.numpy(),
         indices=reference_indices.numpy(),
         quality_scores=quality_scores,
@@ -480,15 +481,17 @@ def variants_from_example(
     )
     return variants
   elif ploidy == 2:
-    # DeepLoid has 2 output sequences at each position:
     variants_by_haplotype = [[], []]
     for ploid in range(2):
-      prediction_sequence = ''.join(vocab_lookup(predicted_vector[ploid]))
+      prediction_sequence = ''.join(vocab_array[predicted_vector[ploid]])
+      logging.info(
+          'Predicted sequence for haplotype %d: %s', ploid, prediction_sequence
+      )
       variants_by_haplotype[ploid] = get_variants_from_prediction(
           contig=contig_name,
           reference_sequence=reference_sequence,
           prediction_sequence=prediction_sequence,
-          active_position=active_position,
+          active_position=active_position_tensor.numpy(),
           positions=reference_positions.numpy(),
           indices=reference_indices.numpy(),
           quality_scores=quality_scores[ploid],

@@ -25,11 +25,9 @@
 # ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-"""Tests for region_processor."""
-
 import dataclasses
 import itertools
-from typing import Any, List, Tuple
+from typing import Any, Optional
 
 from absl.testing import absltest
 from absl.testing import flagsaver
@@ -58,15 +56,23 @@ class ReadAttributes:
     cigartuples: Cigartuple describing the alignment of the read.
     tags: Auxiliary tags for the reads.
   """
-  bam_file: str
   query_name: str
   query_sequence: str
   contig: str
   start: int
-  base_qualities: List[int]
-  mapping_quality: int
-  cigartuples: List[Tuple[int, int]]
-  tags: List[Tuple[str, Any]]
+  cigartuples: list[tuple[int, int]]
+  base_qualities: Optional[list[int]] = None
+  mapping_quality: Optional[int] = None
+  bam_file: Optional[str] = None
+  tags: Optional[list[tuple[str, Any]]] = None
+
+
+@dataclasses.dataclass
+class VariantAttributes:
+  chrom: str
+  pos: int
+  alleles: list[str]
+  genotype: tuple[int, int]
 
 
 class Test(parameterized.TestCase):
@@ -98,6 +104,15 @@ class Test(parameterized.TestCase):
       for tag, value in read_attributes.tags:
         read.set_tag(tag, value)
     return read
+
+  def pysam_read_to_read_attributes(self, read):
+    return ReadAttributes(
+        query_name=read.query_name,
+        query_sequence=read.query_sequence,
+        contig=read.reference_name,
+        start=read.reference_start,
+        cigartuples=read.cigartuples,
+    )
 
   @parameterized.parameters(
       dict(
@@ -771,7 +786,8 @@ class Test(parameterized.TestCase):
                   base_qualities=[1, 2, 3, 4, 5],
                   mapping_quality=60,
                   cigartuples=[(pysam.CMATCH, 5)],
-                  tags=[("HP", 1)]),
+                  tags=[("HP", 1)],
+              ),
               ReadAttributes(
                   bam_file="HG002_chr20_0_200000_hifi_2_GRCh38.bam",
                   query_name="read_2",
@@ -781,7 +797,8 @@ class Test(parameterized.TestCase):
                   base_qualities=[1, 2, 3, 4, 5],
                   mapping_quality=60,
                   cigartuples=[(pysam.CMATCH, 5)],
-                  tags=[("HP", 1)]),
+                  tags=[("HP", 1)],
+              ),
               ReadAttributes(
                   bam_file="HG002_chr20_0_200000_hifi_2_GRCh38.bam",
                   query_name="read_3",
@@ -791,16 +808,19 @@ class Test(parameterized.TestCase):
                   base_qualities=[5, 6, 7, 8, 9, 10, 11],
                   mapping_quality=60,
                   cigartuples=[(pysam.CMATCH, 7)],
-                  tags=[("HP", 1)])
+                  tags=[("HP", 1)],
+              ),
           ],
           ref_seq="ACGTACGTACG",
           expected_values={
               "expected_start_index": 0,
               "expected_end_index": 100,
               "expected_active_position": [2],
-              "example_reads": ["read_1", "read_2"]
+              "example_reads": ["read_1", "read_2"],
           },
-          message="Test 1: Create example with one read outside right interval."
+          message=(
+              "Test 1: Create example with one read outside right interval."
+          ),
       ),
       dict(
           interval=utils_make_images.RegionRecord("chr20", 0, 10),
@@ -814,7 +834,8 @@ class Test(parameterized.TestCase):
                   base_qualities=[1, 2, 3, 4, 5],
                   mapping_quality=60,
                   cigartuples=[(pysam.CMATCH, 5)],
-                  tags=[("HP", 1)]),
+                  tags=[("HP", 1)],
+              ),
               ReadAttributes(
                   bam_file="HG002_chr20_0_200000_hifi_2_GRCh38.bam",
                   query_name="read_2",
@@ -824,7 +845,8 @@ class Test(parameterized.TestCase):
                   base_qualities=[1, 2, 3, 4, 5],
                   mapping_quality=60,
                   cigartuples=[(pysam.CMATCH, 5)],
-                  tags=[("HP", 1)]),
+                  tags=[("HP", 1)],
+              ),
               ReadAttributes(
                   bam_file="HG002_chr20_0_200000_hifi_2_GRCh38.bam",
                   query_name="read_3",
@@ -834,7 +856,8 @@ class Test(parameterized.TestCase):
                   base_qualities=[5, 6, 7, 8, 9, 10, 11],
                   mapping_quality=60,
                   cigartuples=[(pysam.CMATCH, 7)],
-                  tags=[("HP", 1)]),
+                  tags=[("HP", 1)],
+              ),
               ReadAttributes(
                   bam_file="HG002_chr20_0_200000_hifi_2_GRCh38.bam",
                   query_name="read_4",
@@ -844,16 +867,17 @@ class Test(parameterized.TestCase):
                   base_qualities=[5, 6, 7, 8, 9, 10, 11],
                   mapping_quality=60,
                   cigartuples=[(pysam.CMATCH, 7)],
-                  tags=[("HP", 1)])
+                  tags=[("HP", 1)],
+              ),
           ],
           ref_seq="ACGTACGTACG",
           expected_values={
               "expected_start_index": 0,
               "expected_end_index": 100,
               "expected_active_position": [5],
-              "example_reads": ["read_3", "read_4"]
+              "example_reads": ["read_3", "read_4"],
           },
-          message="Test 2: Create example with one read outside left interval."
+          message="Test 2: Create example with one read outside left interval.",
       ),
       dict(
           interval=utils_make_images.RegionRecord("chr20", 0, 10),
@@ -866,9 +890,13 @@ class Test(parameterized.TestCase):
                   start=0,
                   base_qualities=[1, 2, 2, 2, 3, 4, 5],
                   mapping_quality=60,
-                  cigartuples=[(pysam.CMATCH, 2), (pysam.CMATCH, 2),
-                               (pysam.CINS, 3)],
-                  tags=[("HP", 1)]),
+                  cigartuples=[
+                      (pysam.CMATCH, 2),
+                      (pysam.CMATCH, 2),
+                      (pysam.CINS, 3),
+                  ],
+                  tags=[("HP", 1)],
+              ),
               ReadAttributes(
                   bam_file="HG002_chr20_0_200000_hifi_2_GRCh38.bam",
                   query_name="read_1",
@@ -878,7 +906,8 @@ class Test(parameterized.TestCase):
                   base_qualities=[1, 2, 3, 4, 5],
                   mapping_quality=60,
                   cigartuples=[(pysam.CMATCH, 5)],
-                  tags=[("HP", 1)]),
+                  tags=[("HP", 1)],
+              ),
               ReadAttributes(
                   bam_file="HG002_chr20_0_200000_hifi_2_GRCh38.bam",
                   query_name="read_2",
@@ -888,7 +917,8 @@ class Test(parameterized.TestCase):
                   base_qualities=[1, 2, 3, 4, 5],
                   mapping_quality=60,
                   cigartuples=[(pysam.CMATCH, 5)],
-                  tags=[("HP", 1)]),
+                  tags=[("HP", 1)],
+              ),
               ReadAttributes(
                   bam_file="HG002_chr20_0_200000_hifi_2_GRCh38.bam",
                   query_name="read_3",
@@ -898,20 +928,76 @@ class Test(parameterized.TestCase):
                   base_qualities=[5, 6, 7, 8, 9, 10, 11],
                   mapping_quality=60,
                   cigartuples=[(pysam.CMATCH, 7)],
-                  tags=[("HP", 1)])
+                  tags=[("HP", 1)],
+              ),
           ],
           ref_seq="ACGTACGTACG",
           expected_values={
               "expected_start_index": 0,
               "expected_end_index": 100,
               "expected_active_position": [2],
-              "example_reads": ["read_1", "read_2"]
+              "example_reads": ["read_1", "read_2"],
           },
-          message="Test 3: Create example with truth_read."),
+          message="Test 3: Create example with truth_read.",
+      ),
+      dict(
+          interval=utils_make_images.RegionRecord("chr20", 0, 10),
+          read_attrs=[
+              ReadAttributes(
+                  bam_file="HG002_chr20_0_200000_hifi_2_GRCh38.bam",
+                  query_name="read_1",
+                  query_sequence="ACTTA",
+                  contig="chr20",
+                  start=0,
+                  base_qualities=[1, 2, 3, 4, 5],
+                  mapping_quality=60,
+                  cigartuples=[(pysam.CMATCH, 5)],
+                  tags=[("HP", 0)],
+              ),
+              ReadAttributes(
+                  bam_file="HG002_chr20_0_200000_hifi_2_GRCh38.bam",
+                  query_name="read_2",
+                  query_sequence="ACTTA",
+                  contig="chr20",
+                  start=0,
+                  base_qualities=[1, 2, 3, 4, 5],
+                  mapping_quality=60,
+                  cigartuples=[(pysam.CMATCH, 5)],
+                  tags=[("HP", 1)],
+              ),
+              ReadAttributes(
+                  bam_file="HG002_chr20_0_200000_hifi_2_GRCh38.bam",
+                  query_name="read_3",
+                  query_sequence="ACGTACG",
+                  contig="chr20",
+                  start=0,
+                  base_qualities=[5, 6, 7, 8, 9, 10, 11],
+                  mapping_quality=60,
+                  cigartuples=[(pysam.CMATCH, 7)],
+                  tags=[("HP", 2)],
+              ),
+          ],
+          ref_seq="ACGTACGTACG",
+          expected_values={
+              "expected_start_index": 0,
+              "expected_end_index": 100,
+              "expected_active_position": [2],
+              "example_reads": ["read_1", "read_2", "read_3"],
+          },
+          message="Test 4: Create example composed by haplotype.",
+          compose_by_haplotype=True,
+      ),
   )
   @flagsaver.flagsaver
-  def test_get_tf_examples(self, interval, read_attrs, ref_seq, expected_values,
-                           message):
+  def test_get_tf_examples(
+      self,
+      interval,
+      read_attrs,
+      ref_seq,
+      expected_values,
+      message,
+      compose_by_haplotype=False,
+  ):
     """Test get_tf_examples class.
 
     Args:
@@ -920,6 +1006,7 @@ class Test(parameterized.TestCase):
       ref_seq: Reference sequence.
       expected_values: Values we expect the methods to return.
       message: Message to print for the test.
+      compose_by_haplotype: Whether to compose reads by haplotype.
     """
     # first convert the reads to pysam reads
     reads = [
@@ -988,6 +1075,7 @@ class Test(parameterized.TestCase):
         example_width=spaced_length,
         reads=overlapping_encoded_reads,
         encoded_ref=encoded_reference,
+        compose_by_haplotype=compose_by_haplotype,
     )
     expected_data = expected_encoded_example.example[:, expected_values[
         "expected_start_index"]:expected_values["expected_end_index"], :]
@@ -1009,6 +1097,7 @@ class Test(parameterized.TestCase):
         ploidy=1,
         truths=truth_reads,
         bed_interval_regions=[interval],
+        compose_by_haplotype=compose_by_haplotype,
     )
     # make sure we only have one example which is expected.
     self.assertLen(all_tf_examples, 1)
@@ -1040,7 +1129,8 @@ class Test(parameterized.TestCase):
               base_qualities=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
               mapping_quality=60,
               cigartuples=[(pysam.CMATCH, 11)],
-              tags=[("HP", 1)]),
+              tags=[("HP", 1)],
+          ),
           reference_sequence="ACGTACGTACA",
           expected_values={
               "encoded_bases": [
@@ -1049,14 +1139,16 @@ class Test(parameterized.TestCase):
               ],
               "encoded_base_qualities": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
               "encoded_mapping_quality": [60] * 11,
-              "encoded_match_mismatch":
-                  [encoding._MATCH_MISMATCH_ENCODINGS["M"]] * 11,
+              "encoded_match_mismatch": [
+                  encoding._MATCH_MISMATCH_ENCODINGS["M"]
+              ] * 11,
               "encoded_reference": [
                   encoding._BASE_ENCODINGS[base.upper()]
                   for base in list("ACGTACGTACA")
               ],
           },
-          message="Test 1: Simple encoding test one read."),
+          message="Test 1: Simple encoding test one read.",
+      ),
       dict(
           interval=utils_make_images.RegionRecord("chr20", 0, 3),
           read_attr=ReadAttributes(
@@ -1067,9 +1159,13 @@ class Test(parameterized.TestCase):
               start=0,
               base_qualities=[121, 2, 3, 4, 5],
               mapping_quality=121,
-              cigartuples=[(pysam.CMATCH, 2), (pysam.CINS, 1),
-                           (pysam.CMATCH, 2)],
-              tags=[("HP", 1)]),
+              cigartuples=[
+                  (pysam.CMATCH, 2),
+                  (pysam.CINS, 1),
+                  (pysam.CMATCH, 2),
+              ],
+              tags=[("HP", 1)],
+          ),
           reference_sequence="ACGT",
           expected_values={
               "encoded_bases": [
@@ -1077,7 +1173,11 @@ class Test(parameterized.TestCase):
                   for base in list("ACCGT")
               ],
               "encoded_base_qualities": [
-                  encoding._BASE_QUALITY_CAP, 2, 3, 4, 5
+                  encoding._BASE_QUALITY_CAP,
+                  2,
+                  3,
+                  4,
+                  5,
               ],
               "encoded_mapping_quality": [encoding._MAPPING_QUALITY_CAP] * 5,
               "encoded_match_mismatch": [
@@ -1092,7 +1192,8 @@ class Test(parameterized.TestCase):
                   for base in list("AC*GT")
               ],
           },
-          message="Test 2: Encoding test with insert."),
+          message="Test 2: Encoding test with insert.",
+      ),
       dict(
           interval=utils_make_images.RegionRecord("chr20", 0, 3),
           read_attr=ReadAttributes(
@@ -1103,9 +1204,13 @@ class Test(parameterized.TestCase):
               start=0,
               base_qualities=[121, 2, 3, 4, 5],
               mapping_quality=121,
-              cigartuples=[(pysam.CMATCH, 2), (pysam.CINS, 1),
-                           (pysam.CMATCH, 2)],
-              tags=[("HP", 1)]),
+              cigartuples=[
+                  (pysam.CMATCH, 2),
+                  (pysam.CINS, 1),
+                  (pysam.CMATCH, 2),
+              ],
+              tags=[("HP", 1)],
+          ),
           reference_sequence="ACGC",
           expected_values={
               "encoded_bases": [
@@ -1113,7 +1218,11 @@ class Test(parameterized.TestCase):
                   for base in list("ACCGT")
               ],
               "encoded_base_qualities": [
-                  encoding._BASE_QUALITY_CAP, 2, 3, 4, 5
+                  encoding._BASE_QUALITY_CAP,
+                  2,
+                  3,
+                  4,
+                  5,
               ],
               "encoded_mapping_quality": [encoding._MAPPING_QUALITY_CAP] * 5,
               "encoded_match_mismatch": [
@@ -1128,7 +1237,8 @@ class Test(parameterized.TestCase):
                   for base in list("AC*GC")
               ],
           },
-          message="Test 3: Encoding test with insert and one mismatch."),
+          message="Test 3: Encoding test with insert and one mismatch.",
+      ),
       dict(
           interval=utils_make_images.RegionRecord("chr20", 0, 3),
           read_attr=ReadAttributes(
@@ -1139,9 +1249,14 @@ class Test(parameterized.TestCase):
               start=0,
               base_qualities=[121, 2, 3, 4],
               mapping_quality=121,
-              cigartuples=[(pysam.CMATCH, 2), (pysam.CINS, 1),
-                           (pysam.CMATCH, 1), (pysam.CDEL, 1)],
-              tags=[("HP", 1)]),
+              cigartuples=[
+                  (pysam.CMATCH, 2),
+                  (pysam.CINS, 1),
+                  (pysam.CMATCH, 1),
+                  (pysam.CDEL, 1),
+              ],
+              tags=[("HP", 1)],
+          ),
           reference_sequence="ACGC",
           expected_values={
               "encoded_bases": [
@@ -1149,7 +1264,11 @@ class Test(parameterized.TestCase):
                   for base in list("ACCT*")
               ],
               "encoded_base_qualities": [
-                  encoding._BASE_QUALITY_CAP, 2, 3, 4, 0
+                  encoding._BASE_QUALITY_CAP,
+                  2,
+                  3,
+                  4,
+                  0,
               ],
               "encoded_mapping_quality": [encoding._MAPPING_QUALITY_CAP] * 5,
               "encoded_match_mismatch": [
@@ -1164,7 +1283,8 @@ class Test(parameterized.TestCase):
                   for base in list("AC*GC")
               ],
           },
-          message="Test 4: Encoding test with insert, delete and mismatch."),
+          message="Test 4: Encoding test with insert, delete and mismatch.",
+      ),
       dict(
           interval=utils_make_images.RegionRecord("chr20", 0, 3),
           read_attr=ReadAttributes(
@@ -1175,9 +1295,15 @@ class Test(parameterized.TestCase):
               start=0,
               base_qualities=[2, 2, 121, 2, 3, 4],
               mapping_quality=121,
-              cigartuples=[(pysam.CINS, 2), (pysam.CMATCH, 2), (pysam.CINS, 1),
-                           (pysam.CMATCH, 1), (pysam.CDEL, 1)],
-              tags=[("HP", 1)]),
+              cigartuples=[
+                  (pysam.CINS, 2),
+                  (pysam.CMATCH, 2),
+                  (pysam.CINS, 1),
+                  (pysam.CMATCH, 1),
+                  (pysam.CDEL, 1),
+              ],
+              tags=[("HP", 1)],
+          ),
           reference_sequence="ACGC",
           expected_values={
               "encoded_bases": [
@@ -1185,7 +1311,11 @@ class Test(parameterized.TestCase):
                   for base in list("ACCT*")
               ],
               "encoded_base_qualities": [
-                  encoding._BASE_QUALITY_CAP, 2, 3, 4, 0
+                  encoding._BASE_QUALITY_CAP,
+                  2,
+                  3,
+                  4,
+                  0,
               ],
               "encoded_mapping_quality": [encoding._MAPPING_QUALITY_CAP] * 5,
               "encoded_match_mismatch": [
@@ -1200,7 +1330,8 @@ class Test(parameterized.TestCase):
                   for base in list("AC*GC")
               ],
           },
-          message="Test 5: Encoding test with leading insert."),
+          message="Test 5: Encoding test with leading insert.",
+      ),
       dict(
           interval=utils_make_images.RegionRecord("chr20", 0, 3),
           read_attr=ReadAttributes(
@@ -1212,12 +1343,15 @@ class Test(parameterized.TestCase):
               base_qualities=[1, 2, 3, 4],
               mapping_quality=60,
               cigartuples=[(pysam.CMATCH, 11)],
-              tags=[("HP", 0)]),
+              tags=[("HP", 0)],
+          ),
           reference_sequence="ACGTACGTACA",
           expected_values={
               "encoded_bases": [
-                  encoding._BASE_ENCODINGS["A"], 0,
-                  encoding._BASE_ENCODINGS["G"], encoding._BASE_ENCODINGS["T"]
+                  encoding._BASE_ENCODINGS["A"],
+                  0,
+                  encoding._BASE_ENCODINGS["G"],
+                  encoding._BASE_ENCODINGS["T"],
               ],
               "encoded_base_qualities": [1, 2, 3, 4],
               "encoded_mapping_quality": [60, 60, 60, 60],
@@ -1225,14 +1359,15 @@ class Test(parameterized.TestCase):
                   encoding._MATCH_MISMATCH_ENCODINGS["M"],
                   encoding._MATCH_MISMATCH_ENCODINGS["X"],
                   encoding._MATCH_MISMATCH_ENCODINGS["M"],
-                  encoding._MATCH_MISMATCH_ENCODINGS["M"]
+                  encoding._MATCH_MISMATCH_ENCODINGS["M"],
               ],
               "encoded_reference": [
                   encoding._BASE_ENCODINGS[base.upper()]
                   for base in list("ACGT")
               ],
           },
-          message="Test 6: Encoding test with haplotype 0 and N bases."),
+          message="Test 6: Encoding test with haplotype 0 and N bases.",
+      ),
       dict(
           interval=utils_make_images.RegionRecord("chr20", 0, 21),
           read_attr=ReadAttributes(
@@ -1243,9 +1378,13 @@ class Test(parameterized.TestCase):
               start=0,
               base_qualities=[60] * 77,
               mapping_quality=60,
-              cigartuples=[(pysam.CMATCH, 11), (pysam.CINS, 55),
-                           (pysam.CMATCH, 11)],
-              tags=[("HP", 1)]),
+              cigartuples=[
+                  (pysam.CMATCH, 11),
+                  (pysam.CINS, 55),
+                  (pysam.CMATCH, 11),
+              ],
+              tags=[("HP", 1)],
+          ),
           reference_sequence="ACGTACGTACAACGTACGTACA",
           expected_values={
               "encoded_bases": [
@@ -1254,14 +1393,16 @@ class Test(parameterized.TestCase):
               ],
               "encoded_base_qualities": [60] * 22,
               "encoded_mapping_quality": [60] * 22,
-              "encoded_match_mismatch":
-                  [encoding._MATCH_MISMATCH_ENCODINGS["M"]] * 22,
+              "encoded_match_mismatch": [
+                  encoding._MATCH_MISMATCH_ENCODINGS["M"]
+              ] * 22,
               "encoded_reference": [
                   encoding._BASE_ENCODINGS[base.upper()]
                   for base in list("ACGTACGTACAACGTACGTACA")
               ],
           },
-          message="Test 7: Large insertion that should be ignored."),
+          message="Test 7: Large insertion that should be ignored.",
+      ),
       dict(
           interval=utils_make_images.RegionRecord("chr20", 0, 21),
           read_attr=ReadAttributes(
@@ -1272,9 +1413,13 @@ class Test(parameterized.TestCase):
               start=0,
               base_qualities=[60] * 22,
               mapping_quality=60,
-              cigartuples=[(pysam.CMATCH, 11), (pysam.CDEL, 55),
-                           (pysam.CMATCH, 11)],
-              tags=[("HP", 1)]),
+              cigartuples=[
+                  (pysam.CMATCH, 11),
+                  (pysam.CDEL, 55),
+                  (pysam.CMATCH, 11),
+              ],
+              tags=[("HP", 1)],
+          ),
           reference_sequence="ACGTACGTACAACGTACGTACAACGTACGTACAACGTACGTACAACGTACGTACAACGTACGTACAACGTACGTACA",
           expected_values={
               "encoded_bases": [
@@ -1283,19 +1428,26 @@ class Test(parameterized.TestCase):
               ],
               "encoded_base_qualities": [60] * 11 + [0] * 11,
               "encoded_mapping_quality": [60] * 22,
-              "encoded_match_mismatch":
-                  [encoding._MATCH_MISMATCH_ENCODINGS["M"]] * 11 +
-                  [encoding._MATCH_MISMATCH_ENCODINGS["X"]] * 11,
+              "encoded_match_mismatch": [
+                  encoding._MATCH_MISMATCH_ENCODINGS["M"]
+              ] * 11 + [encoding._MATCH_MISMATCH_ENCODINGS["X"]] * 11,
               "encoded_reference": [
                   encoding._BASE_ENCODINGS[base.upper()]
                   for base in list("ACGTACGTACAACGTACGTACA")
               ],
           },
-          message="Test 8: Large deletion has no affect during encoding."),
+          message="Test 8: Large deletion has no affect during encoding.",
+      ),
   )
   @flagsaver.flagsaver
-  def test_encoding_dataclasses(self, interval, read_attr, reference_sequence,
-                                expected_values, message):
+  def test_encoding_dataclasses(
+      self,
+      interval,
+      read_attr,
+      reference_sequence,
+      expected_values,
+      message,
+  ):
     """Test dataclasses that handle positional spacing.
 
     Dataclasses tested in this module are:
@@ -1343,6 +1495,12 @@ class Test(parameterized.TestCase):
         encoded_read.encoded_match_mismatch.tolist(),
         expected_values["encoded_match_mismatch"],
         msg=": ".join([message, "encoded_match_mismatch"]))
+
+    self.assertEqual(
+        encoded_read.encoded_haplotype_tag,
+        encoding.get_hp_encoding(read_attr.tags[0][1]),
+        msg=": ".join([message, "encoded_haplotype_tag"]),
+    )
 
     self.assertEqual(
         encoded_reference.encoded_reference.tolist(),
@@ -1514,6 +1672,7 @@ class Test(parameterized.TestCase):
         bam_file=bam_file,
         fasta_file=fasta_file,
         truth_to_ref=truth_hap_bam,
+        truth_vcf=None,
         bed_regions_by_contig=bed_regions,
         all_intervals=all_intervals,
         train_mode=train_mode,
@@ -1521,6 +1680,7 @@ class Test(parameterized.TestCase):
         process_id=0,
         cpus=1,
         ploidy=1,
+        compose_by_haplotype=False,
     )
     run_summary = region_processor.run_process(options)
 
@@ -1616,6 +1776,538 @@ class Test(parameterized.TestCase):
         active_positions, distance_threshold, positions_to_index
     )
     self.assertListEqual(returned_list, expected_filtered_list, msg=message)
+
+  @parameterized.parameters(
+      dict(
+          truth_variants_attributes=[
+              VariantAttributes(
+                  chrom="chr1", pos=30, alleles=["A", "C"], genotype=(0, 1)
+              ),
+          ],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 10),
+                      (pysam.CMATCH, 1),
+                      (pysam.CMATCH, 35),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTCCACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 10),
+                      (pysam.CMATCH, 1),
+                      (pysam.CMATCH, 35),
+                  ],
+              ),
+          ],
+          message="Test 1: One heterozygous variant GT=0/1.",
+      ),
+      dict(
+          truth_variants_attributes=[
+              VariantAttributes(
+                  chrom="chr1", pos=30, alleles=["A", "ACC"], genotype=(0, 1)
+              ),
+          ],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 10),
+                      (pysam.CMATCH, 1),
+                      (pysam.CMATCH, 35),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTACCCACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 11),
+                      (pysam.CINS, 2),
+                      (pysam.CMATCH, 35),
+                  ],
+              ),
+          ],
+          message="Test 2: One heterozygous INS variant GT=0/1.",
+      ),
+      dict(
+          truth_variants_attributes=[
+              VariantAttributes(
+                  chrom="chr1", pos=30, alleles=["ACA", "A"], genotype=(0, 1)
+              ),
+          ],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 10),
+                      (pysam.CMATCH, 3),
+                      (pysam.CMATCH, 33),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence="CCATGTATCTACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 11),
+                      (pysam.CDEL, 2),
+                      (pysam.CMATCH, 33),
+                  ],
+              ),
+          ],
+          message="Test 3: One heterozygous DEL variant GT=0/1.",
+      ),
+      dict(
+          truth_variants_attributes=[
+              VariantAttributes(
+                  chrom="chr1",
+                  pos=30,
+                  alleles=["ACA", "A", "ACACC"],
+                  genotype=(2, 1),
+              ),
+          ],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTACACCCTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 13),
+                      (pysam.CINS, 2),
+                      (pysam.CMATCH, 33),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence="CCATGTATCTACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 11),
+                      (pysam.CDEL, 2),
+                      (pysam.CMATCH, 33),
+                  ],
+              ),
+          ],
+          message="Test 4: Two variants with switched phase GT=2/1",
+      ),
+      dict(
+          truth_variants_attributes=[
+              VariantAttributes(
+                  chrom="chr1", pos=30, alleles=["ACA", "A"], genotype=(0, 1)
+              ),
+              VariantAttributes(
+                  chrom="chr1", pos=40, alleles=["T", "TAAA"], genotype=(0, 1)
+              ),
+          ],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",  # This read is same as ref.
+                  query_sequence=(
+                      "CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 10),
+                      (pysam.CMATCH, 3),  # Ref allele "ACA".
+                      (pysam.CMATCH, 7),  # Ref between variants.
+                      (pysam.CMATCH, 1),  # Ref allele "T".
+                      (pysam.CMATCH, 25),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",  # Read contains both del and ins.
+                  query_sequence=(
+                      "CCATGTATCTACTGCATTTAAACGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 11),
+                      (pysam.CDEL, 2),  # Del allele "ACA->A".
+                      (pysam.CMATCH, 8),  # Ref between variants.
+                      (pysam.CINS, 3),  # Ins allele "T->TAAA".
+                      (pysam.CMATCH, 25),
+                  ],
+              ),
+          ],
+          message=(
+              "Test 5: DEL followed by an INS variant on the same haplotype"
+          ),
+      ),
+      dict(
+          truth_variants_attributes=[
+              VariantAttributes(
+                  chrom="chr1", pos=30, alleles=["A", "ATTT"], genotype=(0, 1)
+              ),
+              VariantAttributes(
+                  chrom="chr1", pos=40, alleles=["TCG", "T"], genotype=(0, 1)
+              ),
+          ],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",  # This read is same as ref.
+                  query_sequence=(
+                      "CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 10),
+                      (pysam.CMATCH, 1),  # Ref allele "T".
+                      (pysam.CMATCH, 9),  # Ref between variants.
+                      (pysam.CMATCH, 3),  # Ref allele "ACA".
+                      (pysam.CMATCH, 23),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",  # Read contains both del and ins.
+                  query_sequence=(
+                      "CCATGTATCTATTTCACTGCATTTCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 11),
+                      (pysam.CINS, 3),  # Ins allele "T->TAAA".
+                      (pysam.CMATCH, 10),  # Ref between variants.
+                      (pysam.CDEL, 2),  # Del allele "ACA->A".
+                      (pysam.CMATCH, 23),
+                  ],
+              ),
+          ],
+          message="Test 6: INS followed by a DEL variant on the same haplotype",
+      ),
+      dict(
+          truth_variants_attributes=[
+              VariantAttributes(
+                  chrom="chr1",
+                  pos=30,
+                  alleles=["ACA", "A", "ATA"],
+                  genotype=(1, 2),
+              ),
+          ],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence="CCATGTATCTACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 11),
+                      (pysam.CDEL, 2),
+                      (pysam.CMATCH, 33),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTATACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 10),
+                      (pysam.CMATCH, 3),
+                      (pysam.CMATCH, 33),
+                  ],
+              ),
+          ],
+          message="Test 7: Deletion and SNP, GT=1|2",
+      ),
+      dict(
+          truth_variants_attributes=[
+              VariantAttributes(
+                  chrom="chr1",
+                  pos=20,
+                  alleles=["CCAT", "C", "CCATAAA"],
+                  genotype=(2, 1),
+              ),
+          ],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATAAAGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 4),
+                      (pysam.CINS, 3),
+                      (pysam.CMATCH, 42),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence="CGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 1),
+                      (pysam.CDEL, 3),
+                      (pysam.CMATCH, 42),
+                  ],
+              ),
+          ],
+          message="Test 8: Two variants at the start of the interval.",
+      ),
+      dict(
+          truth_variants_attributes=[
+              VariantAttributes(
+                  chrom="chr1",
+                  pos=61,
+                  alleles=["AGGCG", "A", "AGGCGAAAAAAAA"],
+                  genotype=(2, 1),
+              ),
+          ],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCGAAAAAAAA"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 46),
+                      (pysam.CINS, 8),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTA",
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 42),
+                      (pysam.CDEL, 4),
+                  ],
+              ),
+          ],
+          message="Test 9: Two variants at the end of the interval.",
+      ),
+      dict(
+          truth_variants_attributes=[],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 46),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 46),
+                  ],
+              ),
+          ],
+          message="Test 10: Empty truth variants.",
+      ),
+      dict(
+          truth_variants_attributes=[
+              VariantAttributes(
+                  chrom="chr1",
+                  pos=24,
+                  alleles=["GTA", "G", "GTATATA", "GTATATATA"],
+                  genotype=(2, 1),
+              ),
+          ],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATATATATATATATAGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATATATATATATATATATAGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 5),
+                      (pysam.CINS, 4),
+                      (pysam.CMATCH, 40),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence="CCATGTATATATATATATAGCTGTCTCCCTTGCAGTTTAGGCG",
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 5),
+                      (pysam.CDEL, 2),
+                      (pysam.CMATCH, 38),
+                  ],
+              ),
+          ],
+          message=(
+              "Test 11: Non normalized INS, DEL on another allele. "
+              "2 alt alleles"
+          ),
+      ),
+      dict(
+          truth_variants_attributes=[
+              VariantAttributes(
+                  chrom="chr1",
+                  pos=30,
+                  alleles=["A", "AAAT"],
+                  genotype=(1, 0),
+              ),
+              VariantAttributes(
+                  chrom="chr1",
+                  pos=31,
+                  alleles=["C", "CCG"],
+                  genotype=(1, 0),
+              ),
+          ],
+          interval=utils_make_images.RegionRecord("chr1", 20, 65),
+          #                   0123456789012345678901234567890123456789012345
+          #                   0         1         2         3         4
+          reference_sequence="CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG",
+          expected_read_attributes=[
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTAAATCCGACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 11),
+                      (pysam.CINS, 3),
+                      (pysam.CMATCH, 1),
+                      (pysam.CINS, 2),
+                      (pysam.CMATCH, 34),
+                  ],
+              ),
+              ReadAttributes(
+                  query_name="truth_read",
+                  query_sequence=(
+                      "CCATGTATCTACACTGCATTTCGCTGTCTCCCTTGCAGTTTAGGCG"
+                  ),
+                  contig=None,
+                  start=20,
+                  cigartuples=[
+                      (pysam.CMATCH, 10),
+                      (pysam.CMATCH, 1),
+                      (pysam.CMATCH, 1),
+                      (pysam.CMATCH, 34),
+                  ],
+              ),
+          ],
+          message="Test 12: Two INS back to back.",
+      ),
+  )
+  @flagsaver.flagsaver
+  def test_create_truth_reads(
+      self,
+      truth_variants_attributes,
+      interval,
+      reference_sequence,
+      expected_read_attributes,
+      message,
+  ):
+    vcf = pysam.VariantFile(test_utils.polisher_testdata("test.vcf"))
+    truth_variants = [
+        vcf.header.new_record(
+            v.chrom, v.pos, alleles=v.alleles, samples=[{"GT": v.genotype}]
+        )
+        for v in truth_variants_attributes
+    ]
+    generated_read_attributes = [
+        self.pysam_read_to_read_attributes(read)
+        for read in region_processor.create_truth_reads(
+            truth_variants, interval, reference_sequence
+        )
+    ]
+    self.assertListEqual(
+        generated_read_attributes, expected_read_attributes, msg=message
+    )
 
 
 if __name__ == "__main__":
