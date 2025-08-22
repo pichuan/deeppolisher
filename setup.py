@@ -42,8 +42,8 @@ here = pathlib.Path(__file__).parent.resolve()
 
 REQUIREMENTS = (here / 'requirements.txt').read_text().splitlines()
 EXTRA_REQUIREMENTS = {
-    'cpu': ['tensorflow>=2.16.0'],
-    'gpu': ['tensorflow>=2.16.0'],
+    'cpu': ['tensorflow>=2.16.0,<2.20.0'],
+    'gpu': ['tensorflow>=2.16.0,<2.20.0'],
 }
 
 
