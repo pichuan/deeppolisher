@@ -57,7 +57,7 @@ import collections
 import dataclasses
 import os
 import random
-from typing import Callable, List
+from typing import Callable
 
 from absl import flags
 from absl import logging
@@ -156,41 +156,6 @@ class PostProcessExample:
   thread_id: int
 
 
-# --- Helpers for classic assembler predictor ---
-# Build maps dynamically from the encoding module to stay in sync.
-DECODING_MAP = {i: c for i, c in enumerate(encoding.get_vocab())}
-ENCODING_MAP = {c: i for i, c in DECODING_MAP.items()}
-GAP_TOKEN = encoding.get_gap_token()
-
-
-def decode_sequence(encoded_seq_1d: np.ndarray) -> str:
-  """Decodes a 1D numpy array of integers into a sequence string."""
-  return ''.join([DECODING_MAP.get(int(val), '?') for val in encoded_seq_1d])
-
-
-def decode_reads(encoded_reads_tensor: tf.Tensor) -> List[str]:
-  """Decodes a pileup tensor into a list of read strings."""
-  max_coverage = encoding.get_max_coverage()
-  reads_tensor_sliced = encoded_reads_tensor[:max_coverage, :, :]
-  if reads_tensor_sliced.shape[-1] == 1:
-    reads_tensor_sliced = tf.squeeze(reads_tensor_sliced, axis=-1)
-  encoded_reads_np = reads_tensor_sliced.numpy()
-  return [decode_sequence(row) for row in encoded_reads_np]
-
-
-def decode_feature(
-    encoded_reads_tensor: tf.Tensor, feature_order: int
-) -> List[np.ndarray]:
-  """Decodes a pileup tensor into a list of read strings."""
-  max_coverage = encoding.get_max_coverage()
-  start_index = feature_order * max_coverage + 1
-  end_index = (feature_order + 1) * max_coverage
-  reads_tensor_sliced = encoded_reads_tensor[start_index:end_index, :, :]
-  if reads_tensor_sliced.shape[-1] == 1:
-    reads_tensor_sliced = tf.squeeze(reads_tensor_sliced, axis=-1)
-  return list(reads_tensor_sliced.numpy())
-
-
 # The following block is internal because it is still being developed.
 def predict_with_classic_assembler(
     example_batch: dict[str, tf.Tensor],
@@ -203,13 +168,19 @@ def predict_with_classic_assembler(
   for i in range(batch_size):
     # Extract and decode data for one example
     reads_tensor = example_batch['example'][i]
-    reads_data = decode_reads(reads_tensor)
-    base_quality_scores = decode_feature(reads_tensor, feature_order=2)
-    mapping_quality_scores = decode_feature(reads_tensor, feature_order=3)
-    read_haplotypes = decode_feature(reads_tensor, feature_order=4)
+    reads_data = inference_utils.decode_reads(reads_tensor)
+    base_quality_scores = inference_utils.decode_feature(
+        reads_tensor, feature_order=2
+    )
+    mapping_quality_scores = inference_utils.decode_feature(
+        reads_tensor, feature_order=3
+    )
+    read_haplotypes = inference_utils.decode_feature(
+        reads_tensor, feature_order=4
+    )
 
     ref_tensor = tf.squeeze(example_batch['encoded_reference'][i]).numpy()
-    reference_seq = decode_sequence(ref_tensor)
+    reference_seq = inference_utils.decode_sequence(ref_tensor)
 
     # Call the classic assembler. Config can be passed from flags if needed.
     hap1_str, hap2_str = classic_assembler.assemble_haplotypes_fn(
@@ -223,23 +194,33 @@ def predict_with_classic_assembler(
 
     # Encode the output haplotypes back to numpy array format
     hap1_encoded = [
-        ENCODING_MAP.get(c, ENCODING_MAP[GAP_TOKEN]) for c in hap1_str
+        inference_utils.ENCODING_MAP.get(
+            c, inference_utils.ENCODING_MAP[inference_utils.GAP_TOKEN]
+        )
+        for c in hap1_str
     ]
     hap2_encoded = [
-        ENCODING_MAP.get(c, ENCODING_MAP[GAP_TOKEN]) for c in hap2_str
+        inference_utils.ENCODING_MAP.get(
+            c, inference_utils.ENCODING_MAP[inference_utils.GAP_TOKEN]
+        )
+        for c in hap2_str
     ]
     y_pred = np.array([
         np.pad(
             hap1_encoded,
             (0, haplotype_length - len(hap1_encoded)),
             'constant',
-            constant_values=ENCODING_MAP[GAP_TOKEN],
+            constant_values=inference_utils.ENCODING_MAP[
+                inference_utils.GAP_TOKEN
+            ],
         ),
         np.pad(
             hap2_encoded,
             (0, haplotype_length - len(hap2_encoded)),
             'constant',
-            constant_values=ENCODING_MAP[GAP_TOKEN],
+            constant_values=inference_utils.ENCODING_MAP[
+                inference_utils.GAP_TOKEN
+            ],
         ),
     ])[:, :haplotype_length]
     all_y_preds.append(y_pred)

@@ -28,6 +28,7 @@
 """Methods for polisher inference step."""
 
 import dataclasses
+from typing import List
 from typing import Optional, Union
 from absl import logging
 import numpy as np
@@ -38,6 +39,39 @@ from polisher.make_images import encoding
 
 vocab = ''.join(encoding.get_vocab())
 vocab_array = np.array(list(vocab))
+
+# Build maps dynamically from the encoding module to stay in sync.
+DECODING_MAP = {i: c for i, c in enumerate(encoding.get_vocab())}
+ENCODING_MAP = {c: i for i, c in DECODING_MAP.items()}
+GAP_TOKEN = encoding.get_gap_token()
+
+
+def decode_sequence(encoded_seq_1d: np.ndarray) -> str:
+  """Decodes a 1D numpy array of integers into a sequence string."""
+  return ''.join([DECODING_MAP.get(int(val), '?') for val in encoded_seq_1d])
+
+
+def decode_reads(encoded_reads_tensor: tf.Tensor) -> List[str]:
+  """Decodes a pileup tensor into a list of read strings."""
+  max_coverage = encoding.get_max_coverage()
+  reads_tensor_sliced = encoded_reads_tensor[:max_coverage, :, :]
+  if reads_tensor_sliced.shape[-1] == 1:
+    reads_tensor_sliced = tf.squeeze(reads_tensor_sliced, axis=-1)
+  encoded_reads_np = reads_tensor_sliced.numpy()
+  return [decode_sequence(row) for row in encoded_reads_np]
+
+
+def decode_feature(
+    encoded_reads_tensor: tf.Tensor, feature_order: int
+) -> List[np.ndarray]:
+  """Decodes a pileup tensor into a list of features."""
+  max_coverage = encoding.get_max_coverage()
+  start_index = feature_order * max_coverage + 1
+  end_index = (feature_order + 1) * max_coverage
+  reads_tensor_sliced = encoded_reads_tensor[start_index:end_index, :, :]
+  if reads_tensor_sliced.shape[-1] == 1:
+    reads_tensor_sliced = tf.squeeze(reads_tensor_sliced, axis=-1)
+  return list(reads_tensor_sliced.numpy())
 
 
 @dataclasses.dataclass
