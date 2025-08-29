@@ -93,7 +93,8 @@ def decode_feature(
 
 def decode_hp(x: int) -> int:
   """Decodes haplotype tags."""
-  if x not in {1, 2, 3}:
+  # x could be 0 if it's padding at the end.
+  if x not in {0, 1, 2, 3}:
     raise ValueError(f'Unsupported haplotype tag: {x}')
   return {1: 0, 2: 1, 3: 2}.get(x, 0)
 
