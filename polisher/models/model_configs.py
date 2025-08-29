@@ -45,6 +45,7 @@ def testdata_directory() -> str:
 
 def get_feature_hidden_size_map() -> dict[str, int]:
   """Get hidden size defined for each feature."""
+  # TODO: ploidy, include_haplotype_tag.
   feature_depths = encoding.get_feature_depths()
   feature_hidden_sizes = {
       'reference': 2,
@@ -52,7 +53,7 @@ def get_feature_hidden_size_map() -> dict[str, int]:
       'encoded_match_mismatch': 8,
       'encoded_base_qualities': 8,
       'encoded_mapping_quality': 8,
-      'encoded_hp_tag': 2,
+      'encoded_haplotype_tag': 2,
   }
   features_with_hidden_size = feature_hidden_sizes.keys()
   features_in_example = feature_depths.keys()

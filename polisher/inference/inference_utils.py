@@ -28,13 +28,13 @@
 """Methods for polisher inference step."""
 
 import dataclasses
-from typing import List
-from typing import Optional, Union
+from typing import Any, List, Optional, Union
 from absl import logging
 import numpy as np
 import pysam
 import tensorflow as tf
 from polisher.make_images import encoding
+from polisher.models import data_providers
 
 
 vocab = ''.join(encoding.get_vocab())
@@ -44,6 +44,23 @@ vocab_array = np.array(list(vocab))
 DECODING_MAP = {i: c for i, c in enumerate(encoding.get_vocab())}
 ENCODING_MAP = {c: i for i, c in DECODING_MAP.items()}
 GAP_TOKEN = encoding.get_gap_token()
+
+
+def break_example_into_feature_rows(
+    example: np.ndarray,
+    ploidy: int = 1,
+    include_haplotype_tag: bool = False,
+) -> dict[str, Any]:
+  """Break the rows of an example into component features."""
+  features = {}
+  feature_indices = data_providers.get_feature_indices(
+      ploidy, include_haplotype_tag
+  )
+
+  for feature, (start, end) in feature_indices.items():
+    rows = example[slice(start, end)]
+    features[feature] = rows[:, :, 0]
+  return features
 
 
 def decode_sequence(encoded_seq_1d: np.ndarray) -> str:
@@ -72,6 +89,13 @@ def decode_feature(
   if reads_tensor_sliced.shape[-1] == 1:
     reads_tensor_sliced = tf.squeeze(reads_tensor_sliced, axis=-1)
   return list(reads_tensor_sliced.numpy())
+
+
+def decode_hp(x: int) -> int:
+  """Decodes haplotype tags."""
+  if x not in {1, 2, 3}:
+    raise ValueError(f'Unsupported haplotype tag: {x}')
+  return {1: 0, 2: 1, 3: 2}.get(x, 0)
 
 
 @dataclasses.dataclass

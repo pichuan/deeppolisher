@@ -71,22 +71,34 @@ _PROTO_FEATURES_WITH_LABEL = {
 } | _PROTO_FEATURES_INFERENCE
 
 
-def get_total_rows() -> int:
+def get_total_rows(ploidy: int = 1, include_haplotype_tag: bool = False) -> int:
   """Returns total rows in input tf.Examples.
+
+  Args:
+    ploidy: The ploidy of the organism (e.g., 1 for haploid, 2 for diploid).
+    include_haplotype_tag: Whether to include haplotype tag features.
 
   Returns:
     Total number of rows in the full example.
   """
-  return sum(encoding.get_feature_depths().values())
+  return sum(
+      encoding.get_feature_depths(ploidy, include_haplotype_tag).values()
+  )
 
 
-def get_feature_indices() -> dict[str, tuple[int, int]]:
+def get_feature_indices(
+    ploidy: int = 1, include_haplotype_tag: bool = False
+) -> dict[str, tuple[int, int]]:
   """Return slices of each feature values.
+
+  Args:
+    ploidy: The ploidy of the organism (e.g., 1 for haploid, 2 for diploid).
+    include_haplotype_tag: Whether to include haplotype tag features.
 
   Returns:
     A dictionary containing feature_name as key and indices as values.
   """
-  feature_depths = encoding.get_feature_depths()
+  feature_depths = encoding.get_feature_depths(ploidy, include_haplotype_tag)
   feature_indices = dict()
   row_index = 0
   for feature_name, feature_depth in feature_depths.items():
@@ -122,16 +134,20 @@ def parse_example(
   return parsed_features
 
 
-def format_example(example: tf.Tensor) -> tf.Tensor:
+def format_example(
+    example: tf.Tensor, ploidy: int = 1, include_haplotype_tag: bool = False
+) -> tf.Tensor:
   """Returns model input matrix formatted based on input args.
 
   Args:
     example: A parsed example tensor.
+    ploidy: The ploidy of the organism (e.g., 1 for haploid, 2 for diploid).
+    include_haplotype_tag: Whether to include haplotype tag features.
 
   Returns:
     A concatenated tensor of all features extracted from the example.
   """
-  feature_indices_dict = get_feature_indices()
+  feature_indices_dict = get_feature_indices(ploidy, include_haplotype_tag)
   all_rows = []
   for feature_indices in feature_indices_dict.values():
     feature_slice = slice(*feature_indices)
@@ -139,14 +155,19 @@ def format_example(example: tf.Tensor) -> tf.Tensor:
     all_rows.append(feature_rows)
 
   feature_rows_concatenated = tf.concat(all_rows, axis=0)
-  feature_rows_concatenated.set_shape(
-      (get_total_rows(), encoding.get_max_length(), 1)
-  )
+  feature_rows_concatenated.set_shape((
+      get_total_rows(ploidy, include_haplotype_tag),
+      encoding.get_max_length(),
+      1,
+  ))
   return feature_rows_concatenated
 
 
 def process_input(
-    proto_string: Union[tf.Tensor, bytes], inference: bool, ploidy: int = 1
+    proto_string: Union[tf.Tensor, bytes],
+    inference: bool,
+    ploidy: int = 1,
+    include_haplotype_tag: bool = False,
 ) -> dict[str, tf.Tensor]:
   """Parses a serialized tf.Example to return an input, label, and metadata.
 
@@ -154,6 +175,7 @@ def process_input(
     proto_string: A tensor containing the serialized tf.Example string.
     inference: Whether to parse tf.Examples for inference or training.
     ploidy: 1 for haploid, 2 for diploid applications.
+    include_haplotype_tag: Whether to include haplotype tag features.
 
   Returns:
     A dictionary with all attributes of an example.
@@ -170,7 +192,7 @@ def process_input(
 
   example = tf.io.decode_raw(content['example'], _TF_DATA_READ_TYPE)
   example = tf.reshape(example, content['shape'])
-  example_formatted = format_example(example)
+  example_formatted = format_example(example, ploidy, include_haplotype_tag)
   example_formatted = tf.cast(example_formatted, _TF_DATA_TYPE)
 
   attributes = {
@@ -200,7 +222,7 @@ def process_input(
 
 
 def tf_example_to_training_tuple(
-    tf_example: dict[str, tf.Tensor]
+    tf_example: dict[str, tf.Tensor],
 ) -> tuple[tf.Tensor, tf.Tensor]:
   """Return only example and read.
 

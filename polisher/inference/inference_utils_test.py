@@ -28,14 +28,56 @@
 from absl.testing import absltest
 from absl.testing import flagsaver
 from absl.testing import parameterized
+import tensorflow as tf
 
 from polisher.inference import inference_utils
+from polisher.make_images import test_utils
+from polisher.models import data_providers
 
 Variant = inference_utils.Variant
 
 
 class InferenceUtilsTest(parameterized.TestCase):
   """Tests for inference utils."""
+
+  def test_break_example_into_feature_rows(self):
+    """Tests reading a diploid example and checking dimensions."""
+    # Path to the test file.
+    tfrecord_path = test_utils.polisher_testdata(
+        "one_diploid_example.tfrecord.gz"
+    )
+    # Read the TFRecord file.
+    raw_dataset = tf.data.TFRecordDataset(
+        tfrecord_path, compression_type="GZIP"
+    )
+
+    def _parse_fn(example_proto):
+      return data_providers.process_input(
+          example_proto, inference=False, ploidy=2, include_haplotype_tag=True
+      )
+
+    # Parse the records
+    parsed_dataset = raw_dataset.map(_parse_fn)
+
+    # Iterate through the parsed examples
+    for parsed_features in parsed_dataset.take(1):
+      example_tensor = parsed_features["example"]
+      print(f"Dimension of example_tensor: {example_tensor.shape}")
+      self.assertEqual(example_tensor.shape, (301, 100, 1))
+      example_numpy = example_tensor.numpy()
+
+      # Call the function to be tested.
+      features = inference_utils.break_example_into_feature_rows(
+          example_numpy, ploidy=2, include_haplotype_tag=True
+      )
+
+      # Assert the dimensions of the output.
+      self.assertEqual(features["reference"].shape, (1, 100))
+      self.assertEqual(features["encoded_bases"].shape, (60, 100))
+      self.assertEqual(features["encoded_match_mismatch"].shape, (60, 100))
+      self.assertEqual(features["encoded_base_qualities"].shape, (60, 100))
+      self.assertEqual(features["encoded_mapping_quality"].shape, (60, 100))
+      self.assertEqual(features["encoded_haplotype_tag"].shape, (60, 100))
 
   @parameterized.parameters(
       dict(

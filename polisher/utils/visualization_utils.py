@@ -136,7 +136,7 @@ def visualize_features(
           print(f'Ref\t{colorful(decoded_str)}')
         elif feature == 'encoded_match_mismatch':
           print(f'M/X {read_i + 1}\t{colorful(decoded_str)}')
-        # elif feature == 'encoded_hp_tag':
+        # elif feature == 'encoded_haplotype_tag':
         #   print(f'HP {read_i + 1}\t', colorful(decoded_str))
     else:
       print(feature)

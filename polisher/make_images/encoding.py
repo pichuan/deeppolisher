@@ -112,15 +112,19 @@ def get_valid_bases() -> list[str]:
   return _VALID_BASES
 
 
-def get_feature_depths() -> dict[str, int]:
+def get_feature_depths(
+    ploidy: int = 1, include_haplotype_tag: bool = False
+) -> dict[str, int]:
   """Returns the set of features used and the coverage per feature."""
   feature_rows = {
       'reference': 1,
-      'encoded_bases': _MAX_COVERAGE_PER_HAPLOTYPE,
-      'encoded_match_mismatch': _MAX_COVERAGE_PER_HAPLOTYPE,
-      'encoded_base_qualities': _MAX_COVERAGE_PER_HAPLOTYPE,
-      'encoded_mapping_quality': _MAX_COVERAGE_PER_HAPLOTYPE,
+      'encoded_bases': _MAX_COVERAGE_PER_HAPLOTYPE * ploidy,
+      'encoded_match_mismatch': _MAX_COVERAGE_PER_HAPLOTYPE * ploidy,
+      'encoded_base_qualities': _MAX_COVERAGE_PER_HAPLOTYPE * ploidy,
+      'encoded_mapping_quality': _MAX_COVERAGE_PER_HAPLOTYPE * ploidy,
   }
+  if include_haplotype_tag:
+    feature_rows['encoded_haplotype_tag'] = _MAX_COVERAGE_PER_HAPLOTYPE * ploidy
   return feature_rows
 
 
@@ -142,7 +146,7 @@ def get_max_encoding_value_by_feature() -> dict[str, int]:
       'encoded_match_mismatch': max(_MATCH_MISMATCH_ENCODINGS.values()),
       'encoded_base_qualities': _BASE_QUALITY_CAP,
       'encoded_mapping_quality': _MAPPING_QUALITY_CAP,
-      'encoded_hp_tag': max(_HAPLOTYPE_TAG_ENCODING.values()),
+      'encoded_haplotype_tag': max(_HAPLOTYPE_TAG_ENCODING.values()),
   }
   return max_encoding_value
 

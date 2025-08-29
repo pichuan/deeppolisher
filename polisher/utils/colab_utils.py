@@ -36,6 +36,7 @@ import ml_collections
 import numpy as np
 import tensorflow as tf
 
+from polisher.inference import inference_utils
 from polisher.make_images import encoding
 from polisher.models import model_utils
 
@@ -90,31 +91,6 @@ def load_model_from_checkpoint(
   return loaded_model, params
 
 
-def break_example_into_feature_rows(
-    example: np.ndarray, max_coverage: int = 30
-) -> dict[str, Any]:
-  """Break the rows of an example into component features."""
-  feature_rows = {
-      'reference': 1,
-      'encoded_bases': max_coverage,
-      'encoded_match_mismatch': max_coverage,
-      'encoded_base_qualities': max_coverage,
-      'encoded_mapping_quality': max_coverage,
-  }
-  # Sets slices indicating rows for each feature type.
-  feature_indices = dict()
-  i_rows = 0
-  for k, v in feature_rows.items():
-    feature_indices[k] = slice(i_rows, i_rows + feature_rows[k])
-    i_rows += v
-  features = {}
-  for feature in feature_rows:
-    row_slice = feature_indices[feature]
-    rows = example[row_slice]
-    features[feature] = rows[:, :, 0]
-  return features
-
-
 FEATURE_TO_STRING = {
     'reference': {0: '-', 1: 'A', 2: 'C', 3: 'G', 4: 'T', 5: '*'},
     'encoded_bases': {0: '-', 1: 'A', 2: 'C', 3: 'G', 4: 'T', 5: '*'},
@@ -146,7 +122,10 @@ def get_sequences(
     remove_gaps: bool = False,
 ) -> dict[str, Union[str, list[str]]]:
   """Get easy ACGT sequences for ref, labels, and predictions."""
-  features = break_example_into_feature_rows(batch['example'][example_i])
+  # TODO: ploidy, include_haplotype_tag.
+  features = inference_utils.break_example_into_feature_rows(
+      batch['example'][example_i]
+  )
   sequences = {}
   sequences['reference'] = to_acgt(
       features['reference'][0], remove_gaps=remove_gaps
